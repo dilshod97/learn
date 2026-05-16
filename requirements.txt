@@ -1,0 +1,27 @@
+# Backend
+fastapi
+uvicorn[standard]
+python-multipart
+requests
+pydantic
+psutil
+
+# ML / Fine-tuning
+torch>=2.4
+transformers>=4.45
+datasets
+peft>=0.13
+trl>=0.12
+accelerate>=0.34
+bitsandbytes>=0.44
+sentencepiece
+safetensors
+
+# gpt-oss MXFP4 quantization uchun
+triton>=3.0
+# triton-kernels  # pip install git+https://github.com/triton-lang/triton.git#subdirectory=python/triton_kernels
+
+# Conversion uchun (llama.cpp tomonidan ishlatiladi)
+numpy
+sentencepiece
+protobuf

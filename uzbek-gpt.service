@@ -1,0 +1,19 @@
+[Unit]
+Description=Uzbek GPT Fine-Tuning Web Server
+After=network.target ollama.service
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/fine_tune
+Environment="PATH=/home/ubuntu/fine_tune/.venv/bin:/usr/local/cuda/bin:/usr/bin"
+Environment="CUDA_VISIBLE_DEVICES=0"
+ExecStart=/home/ubuntu/fine_tune/.venv/bin/python3 /home/ubuntu/fine_tune/app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/ubuntu/fine_tune/app.log
+StandardError=append:/home/ubuntu/fine_tune/app.log
+
+[Install]
+WantedBy=multi-user.target

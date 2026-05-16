@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>O'zbek GPT — Fine-Tuning</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body{background:#0f172a}
+    .tab-active{background:#1e40af;color:#fff}
+    .tab-inactive{background:#1e293b;color:#94a3b8}
+    .drop-zone.drag-over{border-color:#3b82f6;background:#1e3a5f44}
+    #log-box{font-family:monospace;font-size:13px}
+    .msg-user{background:#1e40af;align-self:flex-end}
+    .msg-bot{background:#1e293b;align-self:flex-start}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{animation:spin 1s linear infinite;display:inline-block}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .pulse{animation:pulse 1.5s ease-in-out infinite}
+    #login-screen{position:fixed;inset:0;background:#0f172a;z-index:9999;display:flex;align-items:center;justify-content:center}
+  #login-screen.hidden{display:none}
+  ::-webkit-scrollbar{width:5px}
+    ::-webkit-scrollbar-track{background:#0f172a}
+    ::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+    .bar-bg{background:#1e293b;border-radius:9999px;height:8px;overflow:hidden}
+    .bar-fill{height:100%;border-radius:9999px;transition:width .5s}
+    .gauge-green{background:linear-gradient(90deg,#22c55e,#16a34a)}
+    .gauge-blue{background:linear-gradient(90deg,#3b82f6,#1d4ed8)}
+    .gauge-yellow{background:linear-gradient(90deg,#f59e0b,#d97706)}
+    .gauge-red{background:linear-gradient(90deg,#ef4444,#b91c1c)}
+  </style>
+</head>
+<body class="text-slate-100 min-h-screen flex flex-col">
+
+<!-- ══ LOGIN SCREEN ══ -->
+<div id="login-screen">
+  <div class="bg-slate-800 rounded-2xl p-8 w-full max-w-sm border border-slate-700 shadow-2xl">
+    <div class="flex items-center gap-3 mb-8">
+      <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold">G</div>
+      <div>
+        <div class="font-semibold">O'zbek GPT</div>
+        <div class="text-xs text-slate-400">Fine-Tuning Panel</div>
+      </div>
+    </div>
+    <div class="space-y-4">
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">Login</label>
+        <input id="inp-user" type="text" placeholder="admin"
+               class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 focus:outline-none focus:border-blue-500 transition"
+               onkeydown="if(event.key==='Enter')document.getElementById('inp-pass').focus()"/>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">Parol</label>
+        <input id="inp-pass" type="password" placeholder="••••••"
+               class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 focus:outline-none focus:border-blue-500 transition"
+               onkeydown="if(event.key==='Enter')doLogin()"/>
+      </div>
+      <p id="login-err" class="text-red-400 text-sm hidden">Login yoki parol noto'g'ri</p>
+      <button onclick="doLogin()"
+              class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium transition mt-2">
+        Kirish
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Header -->
+<header class="border-b border-slate-700 px-6 py-3 flex items-center justify-between shrink-0">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-sm">G</div>
+    <span class="font-semibold text-lg">O'zbek GPT — Fine-Tuning</span>
+  </div>
+  <div class="flex items-center gap-3">
+    <div id="ollama-badge" class="text-xs px-3 py-1 rounded-full bg-slate-700 text-slate-400">
+      Ollama tekshirilmoqda...
+    </div>
+    <button onclick="doLogout()" class="text-xs px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-400 transition">
+      Chiqish
+    </button>
+  </div>
+</header>
+
+<!-- Tabs -->
+<div class="flex gap-1 px-6 pt-4 shrink-0">
+  <button onclick="showTab('upload')"    id="tab-upload"    class="tab-btn px-4 py-2 rounded-t text-sm font-medium transition">📁 Fayl yuklash</button>
+  <button onclick="showTab('training')"  id="tab-training"  class="tab-btn px-4 py-2 rounded-t text-sm font-medium transition">⚙️  Training</button>
+  <button onclick="showTab('chat')"      id="tab-chat"      class="tab-btn px-4 py-2 rounded-t text-sm font-medium transition">💬 Suhbat</button>
+  <button onclick="showTab('monitor')"   id="tab-monitor"   class="tab-btn px-4 py-2 rounded-t text-sm font-medium transition">📊 Monitoring</button>
+</div>
+
+<main class="flex-1 px-6 pb-6 overflow-hidden flex flex-col" style="min-height:0">
+
+<!-- ══════════════════════════════ UPLOAD TAB ══════════════════════════════ -->
+<div id="tab-upload-content" class="tab-content bg-slate-800 rounded-b rounded-tr p-6 flex flex-col gap-5">
+
+  <!-- Drop zone -->
+  <div id="drop-zone"
+       class="drop-zone border-2 border-dashed border-slate-600 rounded-xl p-10 text-center cursor-pointer transition hover:border-blue-500"
+       onclick="document.getElementById('file-input').click()"
+       ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+    <div class="text-4xl mb-3">📂</div>
+    <p class="text-slate-300 font-medium">Fayllarni bu yerga tashlang yoki bosing</p>
+    <p class="text-slate-500 text-sm mt-1">TXT, PDF, DOCX — bir nechta fayl bir vaqtda</p>
+    <input id="file-input" type="file" multiple accept=".txt,.pdf,.docx,.csv,.json"
+           class="hidden" onchange="uploadFiles(this.files)"/>
+  </div>
+
+  <!-- File list -->
+  <div id="file-list" class="space-y-2 max-h-48 overflow-y-auto"></div>
+
+  <!-- Stats bar -->
+  <div id="upload-stats" class="hidden flex items-center gap-4 text-sm text-slate-400 bg-slate-700/40 rounded-lg px-4 py-2">
+    <span>📄 <span id="file-count">0</span> ta fayl</span>
+    <span class="text-slate-600">|</span>
+    <span>💾 <span id="file-size">0</span> MB</span>
+  </div>
+
+  <!-- Actions -->
+  <div class="flex gap-3">
+    <button id="btn-train" onclick="startTraining()"
+            class="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition"
+            disabled>
+      🚀 Fine-Tuning boshlash
+    </button>
+    <button onclick="clearFiles()"
+            class="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition">
+      🗑 Tozalash
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ TRAINING TAB ════════════════════════════ -->
+<div id="tab-training-content" class="tab-content bg-slate-800 rounded-b rounded-tr p-6 flex-col gap-4 hidden">
+
+  <div>
+    <div class="flex justify-between text-sm mb-1">
+      <span id="train-status-label" class="text-slate-400">Kutilmoqda...</span>
+      <span id="train-pct" class="text-blue-400 font-mono">0%</span>
+    </div>
+    <div class="bar-bg">
+      <div id="progress-bar" class="bar-fill gauge-blue" style="width:0%"></div>
+    </div>
+  </div>
+
+  <div id="log-box" class="bg-slate-900 rounded-lg p-4 overflow-y-auto text-slate-300 space-y-0.5 flex-1" style="min-height:300px;max-height:calc(100vh - 320px)">
+    <p class="text-slate-500 italic text-sm">Training boshlanganda loglar shu yerda ko'rinadi...</p>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ CHAT TAB ════════════════════════════════ -->
+<div id="tab-chat-content" class="tab-content bg-slate-800 rounded-b rounded-tr p-6 flex-col gap-3 hidden" style="height:calc(100vh - 160px)">
+
+  <div class="flex items-center gap-3 shrink-0">
+    <label class="text-sm text-slate-400">Model:</label>
+    <select id="model-select" class="bg-slate-700 rounded px-3 py-1.5 text-sm border border-slate-600 focus:outline-none focus:border-blue-500">
+      <option value="uzbek-gpt-local">uzbek-gpt (fine-tuned → gpt-oss:20b)</option>
+    </select>
+    <button onclick="loadModels()" class="text-xs text-slate-500 hover:text-blue-400 transition">↻</button>
+  </div>
+
+  <div id="messages" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-1" style="min-height:0"></div>
+
+  <div class="flex gap-2 shrink-0">
+    <input id="chat-input" type="text" placeholder="Savol yozing..."
+           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
+           class="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 focus:outline-none focus:border-blue-500 transition"/>
+    <button onclick="sendMessage()"
+            class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium transition">
+      ➤
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ MONITOR TAB ════════════════════════════ -->
+<div id="tab-monitor-content" class="tab-content bg-slate-800 rounded-b rounded-tr p-6 hidden overflow-y-auto" style="max-height:calc(100vh - 160px)">
+
+  <!-- Refresh bar -->
+  <div class="flex items-center justify-between mb-5">
+    <h2 class="font-semibold text-slate-200">Tizim holati</h2>
+    <div class="flex items-center gap-3">
+      <span id="mon-updated" class="text-xs text-slate-500"></span>
+      <div class="w-2 h-2 rounded-full bg-green-500 pulse" id="mon-dot"></div>
+    </div>
+  </div>
+
+  <!-- GPU cards -->
+  <section class="mb-6">
+    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">GPU</h3>
+    <div id="gpu-cards" class="grid grid-cols-1 gap-3">
+      <div class="text-slate-500 text-sm italic">Yuklanmoqda...</div>
+    </div>
+  </section>
+
+  <!-- RAM + CPU row -->
+  <section class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+
+    <!-- RAM -->
+    <div class="bg-slate-700/50 rounded-xl p-4">
+      <div class="flex justify-between items-center mb-3">
+        <span class="font-medium text-sm">💾 RAM</span>
+        <span id="ram-label" class="text-xs text-slate-400 font-mono">—</span>
+      </div>
+      <div class="bar-bg mb-1">
+        <div id="ram-bar" class="bar-fill gauge-blue" style="width:0%"></div>
+      </div>
+      <div class="flex justify-between text-xs text-slate-500 mt-1">
+        <span id="ram-used">0 GB</span>
+        <span id="ram-total">0 GB</span>
+      </div>
+    </div>
+
+    <!-- CPU -->
+    <div class="bg-slate-700/50 rounded-xl p-4">
+      <div class="flex justify-between items-center mb-3">
+        <span class="font-medium text-sm">🖥 CPU</span>
+        <span id="cpu-label" class="text-xs text-slate-400 font-mono">—</span>
+      </div>
+      <div class="bar-bg mb-1">
+        <div id="cpu-bar" class="bar-fill gauge-green" style="width:0%"></div>
+      </div>
+      <div class="text-xs text-slate-500 mt-1" id="cpu-info">—</div>
+    </div>
+
+  </section>
+
+  <!-- Ollama loaded models -->
+  <section>
+    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">Ollama — Yuklangan modellar</h3>
+    <div id="ollama-models-table">
+      <div class="text-slate-500 text-sm italic">Yuklanmoqda...</div>
+    </div>
+  </section>
+
+  <!-- Recent chat requests -->
+  <section class="mt-6">
+    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">So'nggi suhbat so'rovlari</h3>
+    <div id="recent-requests" class="bg-slate-700/30 rounded-xl overflow-hidden">
+      <div class="text-slate-500 text-sm italic p-4">Hozircha so'rovlar yo'q</div>
+    </div>
+  </section>
+
+  <!-- Training status -->
+  <section class="mt-6">
+    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">Fine-Tuning holati</h3>
+    <div id="mon-training" class="bg-slate-700/50 rounded-xl p-4 text-sm text-slate-300">—</div>
+  </section>
+
+</div>
+</main>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// LOGIN
+// ══════════════════════════════════════════════════════════════════════════════
+const CREDS = { user: 'admin', pass: 'admin' };
+
+function doLogin() {
+  const u = document.getElementById('inp-user').value.trim();
+  const p = document.getElementById('inp-pass').value;
+  if (u === CREDS.user && p === CREDS.pass) {
+    sessionStorage.setItem('auth', '1');
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('login-err').classList.add('hidden');
+  } else {
+    document.getElementById('login-err').classList.remove('hidden');
+    document.getElementById('inp-pass').value = '';
+    document.getElementById('inp-pass').focus();
+  }
+}
+
+function doLogout() {
+  sessionStorage.removeItem('auth');
+  document.getElementById('inp-user').value = '';
+  document.getElementById('inp-pass').value = '';
+  document.getElementById('login-err').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('hidden');
+}
+
+// Sahifa ochilganda tekshir
+if (!sessionStorage.getItem('auth')) {
+  document.getElementById('login-screen').classList.remove('hidden');
+  setTimeout(() => document.getElementById('inp-user').focus(), 100);
+} else {
+  document.getElementById('login-screen').classList.add('hidden');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TABS
+// ══════════════════════════════════════════════════════════════════════════════
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => {
+    el.classList.add('hidden');
+    el.classList.remove('flex');
+  });
+  document.querySelectorAll('.tab-btn').forEach(el => {
+    el.classList.remove('tab-active');
+    el.classList.add('tab-inactive');
+  });
+  const content = document.getElementById('tab-' + name + '-content');
+  content.classList.remove('hidden');
+  // flex layout kerak bo'lgan tablar
+  if (['training','chat'].includes(name)) content.classList.add('flex');
+  document.getElementById('tab-' + name).classList.add('tab-active');
+  document.getElementById('tab-' + name).classList.remove('tab-inactive');
+
+  if (name === 'monitor') startMonitor();
+  else stopMonitor();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// UPLOAD
+// ══════════════════════════════════════════════════════════════════════════════
+let uploadedCount = 0;
+let uploadedBytes = 0;
+
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.add('drag-over');
+}
+function onDragLeave(e) {
+  document.getElementById('drop-zone').classList.remove('drag-over');
+}
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  uploadFiles(e.dataTransfer.files);
+}
+
+async function uploadFiles(files) {
+  if (!files || files.length === 0) return;
+
+  const form = new FormData();
+  let bytes = 0;
+  for (const f of files) {
+    form.append('files', f);
+    bytes += f.size;
+  }
+
+  // Pending items show
+  const list = document.getElementById('file-list');
+  const tempIds = [];
+  for (const f of files) {
+    const div = document.createElement('div');
+    div.className = 'flex items-center gap-2 bg-slate-700/40 rounded-lg px-4 py-2 text-sm';
+    div.innerHTML = `<span class="spin text-blue-400">⏳</span><span class="text-slate-400">${f.name}</span><span class="ml-auto text-slate-500 text-xs">${(f.size/1024).toFixed(1)} KB</span>`;
+    list.appendChild(div);
+    tempIds.push(div);
+  }
+
+  const res  = await fetch('/api/upload', { method: 'POST', body: form });
+  const data = await res.json();
+
+  // Replace pending with success
+  tempIds.forEach((div, i) => {
+    const name = data.uploaded[i] || files[i].name;
+    div.innerHTML = `<span class="text-green-400">✓</span><span class="text-slate-200">${name}</span><span class="ml-auto text-slate-500 text-xs">${(files[i].size/1024).toFixed(1)} KB</span>`;
+  });
+
+  uploadedCount += data.uploaded.length;
+  uploadedBytes += bytes;
+  updateUploadStats();
+  document.getElementById('btn-train').disabled = false;
+}
+
+function updateUploadStats() {
+  const el = document.getElementById('upload-stats');
+  el.classList.remove('hidden');
+  document.getElementById('file-count').textContent = uploadedCount;
+  document.getElementById('file-size').textContent  = (uploadedBytes / 1024 / 1024).toFixed(2);
+}
+
+async function clearFiles() {
+  await fetch('/api/upload', { method: 'DELETE' });
+  uploadedCount = 0;
+  uploadedBytes = 0;
+  document.getElementById('file-list').innerHTML = '';
+  document.getElementById('upload-stats').classList.add('hidden');
+  document.getElementById('btn-train').disabled = true;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TRAINING
+// ══════════════════════════════════════════════════════════════════════════════
+let logEventSource = null;
+
+async function startTraining() {
+  const res = await fetch('/api/train', { method: 'POST' });
+  if (!res.ok) { alert((await res.json()).detail); return; }
+  showTab('training');
+  startLogStream();
+  pollStatus();
+}
+
+function startLogStream() {
+  if (logEventSource) logEventSource.close();
+  const box = document.getElementById('log-box');
+  box.innerHTML = '';
+
+  logEventSource = new EventSource('/api/logs');
+  logEventSource.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.log !== undefined) {
+      const p = document.createElement('p');
+      p.textContent = data.log;
+      p.className = data.log.includes('❌') ? 'text-red-400'
+                  : data.log.includes('✅') ? 'text-green-400'
+                  : data.log.includes('🚀') || data.log.includes('📦') ? 'text-blue-300'
+                  : data.log.includes('⚠️') ? 'text-yellow-400'
+                  : 'text-slate-300';
+      box.appendChild(p);
+      box.scrollTop = box.scrollHeight;
+    }
+    if (data.done) logEventSource.close();
+  };
+}
+
+const STATUS_LABELS = {
+  idle:'Kutilmoqda', preparing:'Dataset tayyorlanmoqda', training:"Model o'qitilmoqda",
+  converting:"Ollama ga o'tkazilmoqda", ready:'✅ Tayyor!', error:'❌ Xato',
+};
+
+function pollStatus() {
+  const iv = setInterval(async () => {
+    const data = await fetch('/api/status').then(r => r.json());
+    document.getElementById('train-status-label').textContent = STATUS_LABELS[data.status] || data.status;
+    document.getElementById('train-pct').textContent = data.progress + '%';
+    document.getElementById('progress-bar').style.width = data.progress + '%';
+
+    if (data.status === 'ready') {
+      clearInterval(iv);
+      addModelOption(data.model);
+      loadModels();
+    }
+    if (data.status === 'error') clearInterval(iv);
+  }, 2000);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CHAT
+// ══════════════════════════════════════════════════════════════════════════════
+let chatHistory = [];
+
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const msg   = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  input.focus();
+
+  appendMessage('user', msg);
+  chatHistory.push({ role: 'user', content: msg });
+
+  const model  = document.getElementById('model-select').value;
+  const typing = appendMessage('assistant', '');
+  typing.innerHTML = '<span class="spin text-blue-400">⏳</span>';
+
+  try {
+    const res  = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: chatHistory.slice(0, -1), model }),
+    });
+    const data   = await res.json();
+    const answer = res.ok ? data.response : '⚠️ ' + (data.detail || 'Xato');
+    typing.textContent = answer;
+    if (res.ok) chatHistory.push({ role: 'assistant', content: answer });
+  } catch(e) {
+    typing.textContent = '⚠️ Ulanish xatosi: ' + e.message;
+  }
+
+  document.getElementById('messages').scrollTop = 99999;
+}
+
+function appendMessage(role, text) {
+  const box = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = `max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+    role === 'user' ? 'msg-user self-end' : 'msg-bot self-start'
+  }`;
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = 99999;
+  return div;
+}
+
+async function loadModels() {
+  try {
+    const data = await fetch('/api/ollama/models').then(r => r.json());
+    (data.models || []).forEach(m => addModelOption(m.name || m.model));
+  } catch(_) {}
+}
+
+function addModelOption(name) {
+  if (!name) return;
+  const sel = document.getElementById('model-select');
+  if (![...sel.options].some(o => o.value === name)) {
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = name;
+    sel.prepend(opt);
+  }
+  sel.value = name;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MONITORING
+// ══════════════════════════════════════════════════════════════════════════════
+let monInterval = null;
+
+function startMonitor() {
+  fetchMonitor();
+  monInterval = setInterval(fetchMonitor, 4000);
+}
+function stopMonitor() {
+  if (monInterval) { clearInterval(monInterval); monInterval = null; }
+}
+
+async function fetchMonitor() {
+  try {
+    const d = await fetch('/api/monitor').then(r => r.json());
+    renderGPU(d.gpu || []);
+    renderRAM(d.ram);
+    renderCPU(d.cpu);
+    renderOllamaModels(d.ollama_models || []);
+    renderRecentRequests(d.recent_requests || []);
+    renderTrainingStatus(d.training_status);
+    document.getElementById('mon-updated').textContent =
+      'Yangilandi: ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    document.getElementById('mon-updated').textContent = 'Xato: ' + e.message;
+  }
+}
+
+function barColor(pct) {
+  if (pct === null || pct === undefined) return 'gauge-blue';
+  if (pct < 50) return 'gauge-green';
+  if (pct < 80) return 'gauge-yellow';
+  return 'gauge-red';
+}
+
+function renderGPU(gpus) {
+  const el = document.getElementById('gpu-cards');
+  if (gpus.length === 0) {
+    el.innerHTML = '<div class="text-slate-500 text-sm italic bg-slate-700/30 rounded-xl p-4">GPU topilmadi (nvidia-smi yo\'q yoki CUDA yo\'q)</div>';
+    return;
+  }
+  el.innerHTML = gpus.map(g => {
+    const memPct  = g.mem_total ? Math.round(g.mem_used / g.mem_total * 100) : null;
+    const utilPct = g.utilization;
+    return `
+    <div class="bg-slate-700/50 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <span class="font-medium text-sm">🖥 GPU ${g.index}</span>
+          <span class="ml-2 text-xs text-slate-400">${g.name}</span>
+        </div>
+        ${g.temperature !== null ? `<span class="text-xs px-2 py-0.5 rounded-full ${g.temperature > 80 ? 'bg-red-900/50 text-red-300' : g.temperature > 65 ? 'bg-yellow-900/50 text-yellow-300' : 'bg-green-900/50 text-green-300'}">${g.temperature}°C</span>` : ''}
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Utilization -->
+        <div>
+          <div class="flex justify-between text-xs text-slate-400 mb-1">
+            <span>GPU yuki</span>
+            <span class="font-mono">${utilPct !== null ? utilPct + '%' : '—'}</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill ${barColor(utilPct)}" style="width:${utilPct ?? 0}%"></div>
+          </div>
+        </div>
+
+        <!-- VRAM -->
+        <div>
+          <div class="flex justify-between text-xs text-slate-400 mb-1">
+            <span>VRAM</span>
+            <span class="font-mono">${g.mem_used !== null ? g.mem_used + ' / ' + g.mem_total + ' MB' : '—'}</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill ${barColor(memPct)}" style="width:${memPct ?? 0}%"></div>
+          </div>
+        </div>
+      </div>
+
+      ${g.power_draw !== null ? `
+      <div class="mt-3">
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+          <span>Quvvat</span>
+          <span class="font-mono">${g.power_draw}W / ${g.power_limit}W</span>
+        </div>
+        <div class="bar-bg">
+          <div class="bar-fill ${barColor(Math.round(g.power_draw/g.power_limit*100))}" style="width:${Math.round(g.power_draw/g.power_limit*100)}%"></div>
+        </div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderRAM(ram) {
+  if (!ram) return;
+  document.getElementById('ram-label').textContent  = ram.percent + '%';
+  document.getElementById('ram-bar').style.width    = ram.percent + '%';
+  document.getElementById('ram-bar').className      = 'bar-fill ' + barColor(ram.percent);
+  document.getElementById('ram-used').textContent   = ram.used + ' GB';
+  document.getElementById('ram-total').textContent  = ram.total + ' GB';
+}
+
+function renderCPU(cpu) {
+  if (!cpu) return;
+  document.getElementById('cpu-label').textContent = cpu.percent + '%';
+  document.getElementById('cpu-bar').style.width   = cpu.percent + '%';
+  document.getElementById('cpu-bar').className     = 'bar-fill ' + barColor(cpu.percent);
+  document.getElementById('cpu-info').textContent  = `${cpu.cores} yadrо / ${cpu.threads} thread`;
+}
+
+function renderOllamaModels(models) {
+  const el = document.getElementById('ollama-models-table');
+  if (models.length === 0) {
+    el.innerHTML = '<div class="text-slate-500 text-sm italic bg-slate-700/30 rounded-xl p-4">Hozir hech qanday model yuklanmagan</div>';
+    return;
+  }
+  el.innerHTML = `
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-xs text-slate-400 border-b border-slate-700">
+        <th class="text-left pb-2 font-medium">Model</th>
+        <th class="text-right pb-2 font-medium">VRAM</th>
+        <th class="text-right pb-2 font-medium">Hajm</th>
+        <th class="text-right pb-2 font-medium">Expires</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-700/50">
+      ${models.map(m => `
+      <tr class="text-slate-300">
+        <td class="py-2 font-mono text-blue-300">${m.name}</td>
+        <td class="py-2 text-right">${m.size_vram} GB</td>
+        <td class="py-2 text-right">${m.size} GB</td>
+        <td class="py-2 text-right text-slate-500 text-xs">${m.expires_at ? new Date(m.expires_at).toLocaleTimeString() : '—'}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+function renderRecentRequests(reqs) {
+  const el = document.getElementById('recent-requests');
+  if (!reqs.length) {
+    el.innerHTML = '<div class="text-slate-500 text-sm italic p-4">Hozircha so\'rovlar yo\'q</div>';
+    return;
+  }
+  const statusColor = {
+    'ok'              : 'text-green-400',
+    'error'           : 'text-red-400',
+    'ollama-down'     : 'text-red-400',
+    'model-not-found' : 'text-yellow-400',
+  };
+  el.innerHTML = `
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-xs text-slate-400 border-b border-slate-700 bg-slate-800/50">
+        <th class="text-left px-4 py-2 font-medium">Vaqt</th>
+        <th class="text-left px-4 py-2 font-medium">Model</th>
+        <th class="text-left px-4 py-2 font-medium">Savol</th>
+        <th class="text-right px-4 py-2 font-medium">Davom.</th>
+        <th class="text-center px-4 py-2 font-medium">Holat</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-700/30">
+      ${reqs.map(r => `
+      <tr class="text-slate-300 hover:bg-slate-700/20">
+        <td class="px-4 py-2 font-mono text-xs text-slate-500">${r.time}</td>
+        <td class="px-4 py-2 font-mono text-blue-300 text-xs">${r.model}</td>
+        <td class="px-4 py-2 text-slate-200 truncate max-w-xs">${escapeHtml(r.question)}</td>
+        <td class="px-4 py-2 text-right text-xs font-mono text-slate-400">${(r.duration_ms/1000).toFixed(2)}s</td>
+        <td class="px-4 py-2 text-center text-xs ${statusColor[r.status] || 'text-slate-400'}">${r.status}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderTrainingStatus(status) {
+  const labels = {
+    idle:'⏸ Kutilmoqda', preparing:'🔄 Dataset tayyorlanmoqda',
+    training:'🚀 Model o\'qitilmoqda', converting:'⚙️  Ollama ga o\'tkazilmoqda',
+    ready:'✅ Tayyor!', error:'❌ Xato yuz berdi',
+  };
+  const colors = {
+    idle:'text-slate-400', preparing:'text-blue-300', training:'text-yellow-300',
+    converting:'text-blue-300', ready:'text-green-400', error:'text-red-400',
+  };
+  document.getElementById('mon-training').className =
+    'bg-slate-700/50 rounded-xl p-4 text-sm font-medium ' + (colors[status] || 'text-slate-300');
+  document.getElementById('mon-training').textContent = labels[status] || status;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// OLLAMA BADGE
+// ══════════════════════════════════════════════════════════════════════════════
+async function checkOllama() {
+  const badge = document.getElementById('ollama-badge');
+  try {
+    const d = await fetch('/api/ollama/status').then(r => r.json());
+    if (d.running) {
+      badge.className = 'text-xs px-3 py-1 rounded-full bg-green-900/50 text-green-400';
+      badge.textContent = '● Ollama ishlamoqda';
+      loadModels();
+    } else {
+      badge.className = 'text-xs px-3 py-1 rounded-full bg-red-900/50 text-red-400';
+      badge.textContent = '● Ollama o\'chiq';
+    }
+  } catch {
+    badge.className = 'text-xs px-3 py-1 rounded-full bg-slate-700 text-slate-500';
+    badge.textContent = '● Ollama topilmadi';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════════
+document.querySelectorAll('.tab-btn').forEach(b => b.classList.add('tab-inactive'));
+showTab('upload');
+checkOllama();
+setInterval(checkOllama, 30000);
+
+// Mavjud modelni aniqlash
+(async () => {
+  try {
+    const d = await fetch('/api/status').then(r => r.json());
+    if (d.status === 'ready' && d.model) addModelOption(d.model);
+  } catch(_) {}
+})();
+</script>
+</body>
+</html>
