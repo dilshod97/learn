@@ -17,12 +17,8 @@ if [ -f app.pid ]; then
     rm -f app.pid
 fi
 
-# Ollama ishlamayotgan bo'lsa, ishga tushir
-if ! curl -s http://localhost:11435/api/tags > /dev/null 2>&1; then
-    echo "Ollama ishga tushirilmoqda..."
-    sudo systemctl start ollama 2>/dev/null || nohup ollama serve > /tmp/ollama.log 2>&1 &
-    sleep 3
-fi
+# Ollama'ni avto ishga tushirish o'chirildi.
+# Agar kerak bo'lsa, qo'lda: nohup ollama serve > /tmp/ollama.log 2>&1 &
 
 # Venv ni aktivlashtir va serverni ishga tushir
 source .venv/bin/activate
@@ -35,7 +31,7 @@ sleep 2
 
 if kill -0 $(cat app.pid) 2>/dev/null; then
     echo "✅ Server ishlamoqda (PID: $(cat app.pid))"
-    echo "   URL : http://$(hostname -I | awk '{print $1}'):8000"
+    echo "   URL : http://$(hostname -I | awk '{print $1}'):8088"
     echo "   Log : tail -f app.log"
     echo "   Stop: bash stop.sh"
 else
