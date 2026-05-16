@@ -194,14 +194,24 @@ class Trainer:
         dataset = load_dataset("json", data_files=cfg["dataset_file"], split="train")
         self.log(f"📂 Dataset: {len(dataset)} ta misol")
 
-        def fmt(ex):
-            if ex["input"]:
-                return (
-                    f"### Ko'rsatma:\n{ex['instruction']}\n\n"
-                    f"### Kirish:\n{ex['input']}\n\n"
-                    f"### Javob:\n{ex['output']}"
-                )
-            return f"### Ko'rsatma:\n{ex['instruction']}\n\n### Javob:\n{ex['output']}"
+        def fmt(batch):
+            """TRL 0.13+ batch ko'rinishida list qaytarishni talab qiladi."""
+            texts = []
+            instructions = batch["instruction"]
+            inputs       = batch["input"]
+            outputs      = batch["output"]
+            for instr, inp, out in zip(instructions, inputs, outputs):
+                if inp:
+                    texts.append(
+                        f"### Ko'rsatma:\n{instr}\n\n"
+                        f"### Kirish:\n{inp}\n\n"
+                        f"### Javob:\n{out}"
+                    )
+                else:
+                    texts.append(
+                        f"### Ko'rsatma:\n{instr}\n\n### Javob:\n{out}"
+                    )
+            return texts
 
         has_cuda = torch.cuda.is_available()
         training_args = TrainingArguments(
