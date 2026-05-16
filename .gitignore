@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+app.log
+app.pid
+*.pid
+llama.cpp/
+uploads/*
+!uploads/.gitkeep
+uzbek-gpt-lora/
+uzbek-gpt-merged/
+*.gguf
