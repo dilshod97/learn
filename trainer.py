@@ -6,20 +6,20 @@ from pathlib import Path
 
 
 CONFIG = {
-    "base_model"   : "openai/gpt-oss-20b",
+    "base_model"   : "mistralai/Mistral-7B-Instruct-v0.3",  # 7B — 12-15 GB VRAM
     "dataset_file" : "uzbek_dataset.json",
     "output_dir"   : "./uzbek-gpt-lora",
     "merged_dir"   : "./uzbek-gpt-merged",
     "gguf_path"    : "./uzbek-gpt.gguf",
     "chunk_size"   : 300,
-    "lora_r"       : 16,
-    "lora_alpha"   : 32,
+    "lora_r"       : 8,        # 16 → 8 (kamroq VRAM)
+    "lora_alpha"   : 16,       # 32 → 16
     "lora_dropout" : 0.05,
     "epochs"       : 3,
-    "batch_size"   : 2,
-    "grad_accum"   : 8,
+    "batch_size"   : 1,        # 2 → 1 (eng oz VRAM)
+    "grad_accum"   : 16,       # 8 → 16 (effective batch = 16)
     "learning_rate": 2e-4,
-    "max_seq_len"  : 1024,
+    "max_seq_len"  : 512,      # 1024 → 512 (yarmiga)
 }
 
 

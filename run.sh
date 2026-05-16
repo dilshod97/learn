@@ -23,6 +23,9 @@ fi
 # Venv ni aktivlashtir va serverni ishga tushir
 source .venv/bin/activate
 
+# CUDA memory fragmentation oldini olish
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 echo "Server ishga tushirilmoqda..."
 nohup python3 app.py > app.log 2>&1 &
 echo $! > app.pid
