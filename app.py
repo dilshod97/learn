@@ -112,8 +112,9 @@ async def rag_build(background_tasks: BackgroundTasks):
     if not state["uploaded_files"]:
         raise HTTPException(400, "Avval fayl yuklang")
     if not is_embed_available():
-        raise HTTPException(400, "nomic-embed-text Ollama'da topilmadi. "
-                                  "O'rnatish: ollama pull nomic-embed-text")
+        from rag import EMBED_MODEL
+        raise HTTPException(400, f"{EMBED_MODEL} Ollama'da topilmadi. "
+                                  f"O'rnatish: ollama pull {EMBED_MODEL}")
 
     background_tasks.add_task(_build_rag_bg, list(state["uploaded_files"]))
     return {"message": "RAG quriliyapti"}

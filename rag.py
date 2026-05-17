@@ -17,6 +17,23 @@ INDEX_FILE  = "rag_index.json"
 
 
 def _embed(text: str) -> list:
+    # Yangi API: /api/embed (qwen3, bge, va boshqalar uchun)
+    try:
+        r = requests.post(
+            f"{OLLAMA_URL}/api/embed",
+            json={"model": EMBED_MODEL, "input": text},
+            timeout=60,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if "embeddings" in data:
+                return data["embeddings"][0]
+            if "embedding" in data:
+                return data["embedding"]
+    except Exception:
+        pass
+
+    # Eski API: /api/embeddings (nomic-embed-text uchun)
     r = requests.post(
         f"{OLLAMA_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
@@ -140,11 +157,13 @@ class RAGIndex:
 
 
 def is_embed_available() -> bool:
-    """nomic-embed-text Ollama'da bormi tekshirish."""
+    """EMBED_MODEL Ollama'da bormi tekshirish."""
     try:
         r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
         models = r.json().get("models", [])
         names  = [m.get("name", "") for m in models]
-        return any("nomic-embed" in n for n in names)
+        # To'liq nom yoki nom asosi mosligi
+        base = EMBED_MODEL.split(":")[0]
+        return any(EMBED_MODEL == n or base in n for n in names)
     except Exception:
         return False
