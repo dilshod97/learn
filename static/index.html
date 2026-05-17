@@ -115,12 +115,26 @@
     <span>💾 <span id="file-size">0</span> MB</span>
   </div>
 
+  <!-- RAG status -->
+  <div id="rag-status" class="hidden bg-blue-900/30 border border-blue-700/50 rounded-lg p-3 text-sm">
+    <div class="flex items-center justify-between mb-1">
+      <span class="font-medium text-blue-300">📚 RAG holati</span>
+      <span id="rag-stats" class="text-xs text-blue-200">—</span>
+    </div>
+    <div id="rag-logs" class="text-xs text-slate-400 max-h-24 overflow-y-auto font-mono"></div>
+  </div>
+
   <!-- Actions -->
-  <div class="flex gap-3">
+  <div class="flex flex-wrap gap-3">
+    <button id="btn-rag" onclick="buildRAG()"
+            class="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition"
+            disabled>
+      📚 RAG indeksini qurish (tezroq)
+    </button>
     <button id="btn-train" onclick="startTraining()"
             class="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition"
             disabled>
-      🚀 Fine-Tuning boshlash
+      🚀 Fine-Tuning boshlash (sekin)
     </button>
     <button onclick="clearFiles()"
             class="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition">
@@ -150,12 +164,19 @@
 <!-- ══════════════════════════════ CHAT TAB ════════════════════════════════ -->
 <div id="tab-chat-content" class="tab-content bg-slate-800 rounded-b rounded-tr p-6 flex-col gap-3 hidden" style="height:calc(100vh - 160px)">
 
-  <div class="flex items-center gap-3 shrink-0">
+  <div class="flex items-center gap-3 shrink-0 flex-wrap">
     <label class="text-sm text-slate-400">Model:</label>
     <select id="model-select" class="bg-slate-700 rounded px-3 py-1.5 text-sm border border-slate-600 focus:outline-none focus:border-blue-500">
       <option value="uzbek-gpt-local">uzbek-gpt (fine-tuned → gpt-oss:20b)</option>
     </select>
     <button onclick="loadModels()" class="text-xs text-slate-500 hover:text-blue-400 transition">↻</button>
+
+    <!-- RAG toggle -->
+    <label class="ml-auto flex items-center gap-2 cursor-pointer select-none">
+      <input id="rag-toggle" type="checkbox" checked class="w-4 h-4 accent-purple-500"/>
+      <span class="text-sm text-slate-300">📚 RAG</span>
+      <span id="rag-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">tekshirilmoqda</span>
+    </label>
   </div>
 
   <div id="messages" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-1" style="min-height:0"></div>
@@ -360,6 +381,72 @@ async function uploadFiles(files) {
   uploadedBytes += bytes;
   updateUploadStats();
   document.getElementById('btn-train').disabled = false;
+  document.getElementById('btn-rag').disabled   = false;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RAG
+// ══════════════════════════════════════════════════════════════════════════════
+let ragPollInterval = null;
+
+async function buildRAG() {
+  const btn = document.getElementById('btn-rag');
+  btn.disabled = true;
+  btn.textContent = '⏳ Quriliyapti...';
+  document.getElementById('rag-status').classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/rag/build', { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.detail);
+      btn.disabled = false;
+      btn.textContent = '📚 RAG indeksini qurish (tezroq)';
+      return;
+    }
+    startRAGPoll();
+  } catch (e) {
+    alert('Xato: ' + e.message);
+  }
+}
+
+function startRAGPoll() {
+  if (ragPollInterval) clearInterval(ragPollInterval);
+  ragPollInterval = setInterval(async () => {
+    const d = await fetch('/api/rag/status').then(r => r.json());
+
+    const logsEl = document.getElementById('rag-logs');
+    logsEl.innerHTML = d.logs.map(l => `<div>${escapeHtml(l)}</div>`).join('');
+    logsEl.scrollTop = logsEl.scrollHeight;
+
+    document.getElementById('rag-stats').textContent =
+      d.ready ? `${d.stats.total_chunks} chunk, ${Object.keys(d.stats.sources).length} fayl` :
+      d.building ? 'qurilmoqda...' : 'tayyor emas';
+
+    if (!d.building) {
+      clearInterval(ragPollInterval);
+      const btn = document.getElementById('btn-rag');
+      btn.disabled = false;
+      btn.textContent = d.ready ? '✅ RAG tayyor (qayta qurish)' : '📚 RAG indeksini qurish';
+      checkRAG();
+    }
+  }, 1000);
+}
+
+async function checkRAG() {
+  try {
+    const d = await fetch('/api/rag/status').then(r => r.json());
+    const badge = document.getElementById('rag-badge');
+    if (d.ready) {
+      badge.className   = 'text-xs px-2 py-0.5 rounded-full bg-purple-900/50 text-purple-300';
+      badge.textContent = `${d.stats.total_chunks} chunk`;
+      document.getElementById('rag-toggle').checked = true;
+    } else {
+      badge.className   = 'text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-500';
+      badge.textContent = 'tayyor emas';
+      document.getElementById('rag-toggle').checked = false;
+    }
+  } catch(_) {}
 }
 
 function updateUploadStats() {
@@ -450,20 +537,36 @@ async function sendMessage() {
   appendMessage('user', msg);
   chatHistory.push({ role: 'user', content: msg });
 
-  const model  = document.getElementById('model-select').value;
-  const typing = appendMessage('assistant', '');
+  const model   = document.getElementById('model-select').value;
+  const useRag  = document.getElementById('rag-toggle').checked;
+  const typing  = appendMessage('assistant', '');
   typing.innerHTML = '<span class="spin text-blue-400">⏳</span>';
 
   try {
     const res  = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, history: chatHistory.slice(0, -1), model }),
+      body: JSON.stringify({ message: msg, history: chatHistory.slice(0, -1), model, use_rag: useRag }),
     });
-    const data   = await res.json();
-    const answer = res.ok ? data.response : '⚠️ ' + (data.detail || 'Xato');
-    typing.textContent = answer;
-    if (res.ok) chatHistory.push({ role: 'assistant', content: answer });
+    const data = await res.json();
+
+    if (!res.ok) {
+      typing.textContent = '⚠️ ' + (data.detail || 'Xato');
+    } else {
+      typing.textContent = data.response;
+
+      // RAG manbalarini ko'rsatish
+      if (data.rag_used && data.sources && data.sources.length) {
+        const srcDiv = document.createElement('div');
+        srcDiv.className = 'mt-2 pt-2 border-t border-slate-600/40 text-xs text-slate-400';
+        const items = data.sources.map(s =>
+          `<span class="inline-block bg-purple-900/30 text-purple-300 rounded px-2 py-0.5 mr-1 mb-1">📄 ${escapeHtml(s.source)} <span class="opacity-60">(${(s.score*100).toFixed(0)}%)</span></span>`
+        ).join('');
+        srcDiv.innerHTML = `<div class="text-purple-400 mb-1">📚 Manbalar:</div>${items}`;
+        typing.appendChild(srcDiv);
+      }
+      chatHistory.push({ role: 'assistant', content: data.response });
+    }
   } catch(e) {
     typing.textContent = '⚠️ Ulanish xatosi: ' + e.message;
   }
@@ -723,12 +826,13 @@ showTab('upload');
 checkOllama();
 setInterval(checkOllama, 30000);
 
-// Mavjud modelni aniqlash
+// Mavjud modelni aniqlash + RAG holatini tekshirish
 (async () => {
   try {
     const d = await fetch('/api/status').then(r => r.json());
     if (d.status === 'ready' && d.model) addModelOption(d.model);
   } catch(_) {}
+  checkRAG();
 })();
 </script>
 </body>

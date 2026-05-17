@@ -12,14 +12,14 @@ CONFIG = {
     "merged_dir"   : "./uzbek-gpt-merged",
     "gguf_path"    : "./uzbek-gpt.gguf",
     "chunk_size"   : 300,
-    "lora_r"       : 8,        # 16 → 8 (kamroq VRAM)
-    "lora_alpha"   : 16,       # 32 → 16
+    "lora_r"       : 16,       # Q&A uchun kattaroq capacity
+    "lora_alpha"   : 32,
     "lora_dropout" : 0.05,
-    "epochs"       : 3,
-    "batch_size"   : 1,        # 2 → 1 (eng oz VRAM)
-    "grad_accum"   : 16,       # 8 → 16 (effective batch = 16)
-    "learning_rate": 2e-4,
-    "max_seq_len"  : 512,      # 1024 → 512 (yarmiga)
+    "epochs"       : 20,       # Fakt yodlash uchun ko'p epoch
+    "batch_size"   : 1,
+    "grad_accum"   : 8,
+    "learning_rate": 3e-4,     # Tezroq o'rganish
+    "max_seq_len"  : 512,
 }
 
 
@@ -78,6 +78,24 @@ class Trainer:
         if not raw.strip():
             raise ValueError("Yuklangan fayllar bo'sh yoki o'qib bo'lmadi")
 
+        # ── Q&A formatini avto-aniqlash ────────────────────────────────────
+        qa_pairs = self._parse_qa_format(raw)
+        if qa_pairs:
+            self.log(f"📝 Q&A formati aniqlandi: {len(qa_pairs)} ta juftlik")
+            dataset = []
+            for q, a in qa_pairs:
+                dataset.append({
+                    "instruction": q,
+                    "input"      : "",
+                    "output"     : a,
+                })
+            with open(self.cfg["dataset_file"], "w", encoding="utf-8") as f:
+                json.dump(dataset, f, ensure_ascii=False, indent=2)
+            self.log(f"📚 Jami {len(dataset)} ta savol-javob saqlandi")
+            return
+
+        # ── Aks holda — chunklash (eski usul) ──────────────────────────────
+        self.log("ℹ️  Q&A format topilmadi, matn chunklarga bo'linmoqda...")
         text = re.sub(r'[ \t]+', ' ', raw)
         text = re.sub(r'\n{3,}', '\n\n', text)
         text = text.strip()
@@ -114,16 +132,35 @@ class Trainer:
                     "input": " ".join(words[:half]),
                     "output": " ".join(words[half:]),
                 })
-            dataset.append({
-                "instruction": "Quyidagi matn haqida qisqacha ma'lumot ber.",
-                "input": chunk,
-                "output": " ".join(words[:40]) + "...",
-            })
 
         with open(self.cfg["dataset_file"], "w", encoding="utf-8") as f:
             json.dump(dataset, f, ensure_ascii=False, indent=2)
 
         self.log(f"📚 Jami {len(dataset)} ta misol saqlandi → {self.cfg['dataset_file']}")
+
+    def _parse_qa_format(self, text: str) -> list[tuple[str, str]]:
+        """
+        Matnda SAVOL: ... JAVOB: ... formatini topadi.
+        Q: ... A: ... ham qabul qiladi.
+        """
+        # Normalizatsiya
+        text = re.sub(r'\r\n', '\n', text)
+
+        # Regex: SAVOL / SAVOL: / Q: / Question: dan JAVOB / A: / Answer: gacha
+        pattern = re.compile(
+            r'(?:SAVOL|Savol|savol|Q|QUESTION|Question)\s*[:.]?\s*(.+?)\s*'
+            r'(?:JAVOB|Javob|javob|A|ANSWER|Answer)\s*[:.]?\s*(.+?)'
+            r'(?=\s*(?:SAVOL|Savol|savol|Q|QUESTION|Question)\s*[:.]|\Z)',
+            re.DOTALL,
+        )
+
+        pairs = []
+        for m in pattern.finditer(text):
+            q = m.group(1).strip()
+            a = m.group(2).strip()
+            if len(q) >= 5 and len(a) >= 3:
+                pairs.append((q, a))
+        return pairs
 
     def train(self):
         from transformers import (
@@ -194,24 +231,15 @@ class Trainer:
         dataset = load_dataset("json", data_files=cfg["dataset_file"], split="train")
         self.log(f"📂 Dataset: {len(dataset)} ta misol")
 
-        def fmt(batch):
-            """TRL 0.13+ batch ko'rinishida list qaytarishni talab qiladi."""
-            texts = []
-            instructions = batch["instruction"]
-            inputs       = batch["input"]
-            outputs      = batch["output"]
-            for instr, inp, out in zip(instructions, inputs, outputs):
-                if inp:
-                    texts.append(
-                        f"### Ko'rsatma:\n{instr}\n\n"
-                        f"### Kirish:\n{inp}\n\n"
-                        f"### Javob:\n{out}"
-                    )
-                else:
-                    texts.append(
-                        f"### Ko'rsatma:\n{instr}\n\n### Javob:\n{out}"
-                    )
-            return texts
+        def fmt(ex):
+            """TRL 0.12.x har bir misol uchun bitta string kutadi."""
+            if ex["input"]:
+                return (
+                    f"### Ko'rsatma:\n{ex['instruction']}\n\n"
+                    f"### Kirish:\n{ex['input']}\n\n"
+                    f"### Javob:\n{ex['output']}"
+                )
+            return f"### Ko'rsatma:\n{ex['instruction']}\n\n### Javob:\n{ex['output']}"
 
         has_cuda = torch.cuda.is_available()
         training_args = TrainingArguments(

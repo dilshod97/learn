@@ -13,9 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from trainer import Trainer
+from rag import RAGIndex, is_embed_available
 
 # ── State ─────────────────────────────────────────────────────────────────────
 LORA_DIR = Path("./uzbek-gpt-lora")
+
+# RAG index — startupda yuklab olamiz
+rag_index = RAGIndex()
+rag_index.load()
 
 def _init_state() -> dict:
     base = {
@@ -80,6 +85,57 @@ async def clear_uploads():
     return {"ok": True}
 
 
+# ── RAG ───────────────────────────────────────────────────────────────────────
+rag_state = {"building": False, "logs": []}
+
+def _rag_log(msg: str):
+    print(msg, flush=True)
+    rag_state["logs"].append(msg)
+
+
+def _build_rag_bg(files: list):
+    try:
+        rag_state["building"] = True
+        rag_state["logs"]     = []
+        _rag_log("📚 RAG index qurilmoqda...")
+        rag_index.build(files, log=_rag_log)
+    except Exception as e:
+        _rag_log(f"❌ RAG xato: {e}")
+    finally:
+        rag_state["building"] = False
+
+
+@app.post("/api/rag/build")
+async def rag_build(background_tasks: BackgroundTasks):
+    if rag_state["building"]:
+        raise HTTPException(400, "RAG hozir ham qurilmoqda")
+    if not state["uploaded_files"]:
+        raise HTTPException(400, "Avval fayl yuklang")
+    if not is_embed_available():
+        raise HTTPException(400, "nomic-embed-text Ollama'da topilmadi. "
+                                  "O'rnatish: ollama pull nomic-embed-text")
+
+    background_tasks.add_task(_build_rag_bg, list(state["uploaded_files"]))
+    return {"message": "RAG quriliyapti"}
+
+
+@app.get("/api/rag/status")
+async def rag_status():
+    return {
+        "ready"   : rag_index.ready,
+        "building": rag_state["building"],
+        "stats"   : rag_index.stats(),
+        "logs"    : rag_state["logs"][-30:],
+    }
+
+
+@app.delete("/api/rag")
+async def rag_clear():
+    rag_index.clear()
+    rag_state["logs"] = []
+    return {"ok": True}
+
+
 # ── Training ──────────────────────────────────────────────────────────────────
 @app.post("/api/train")
 async def start_training(background_tasks: BackgroundTasks):
@@ -134,6 +190,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list = []
     model: str = "uzbek-gpt"
+    use_rag: bool = True   # RAG yoqilganmi (frontend tanlovi)
 
 
 def _log_request(model: str, question: str, duration_ms: int, status: str = "ok"):
@@ -160,11 +217,33 @@ async def chat(req: ChatRequest):
         actual_model = "gpt-oss:20b"
         system = (
             "Siz o'zbek tilidagi AI yordamchisiz. Foydalanuvchiga doim o'zbek tilida "
-            "aniq va foydali javob bering. Qisqa savolga qisqa, batafsil savolga batafsil."
+            "aniq va foydali javob bering."
         )
     else:
         actual_model = requested
         system = "Siz foydali AI yordamchisiz."
+
+    # RAG: agar yoqilgan va index tayyor bo'lsa, kontekst topamiz
+    rag_sources = []
+    if req.use_rag and rag_index.ready:
+        try:
+            hits = rag_index.search(req.message, top_k=4, threshold=0.3)
+            if hits:
+                ctx_parts = []
+                for i, h in enumerate(hits, 1):
+                    ctx_parts.append(f"[Manba {i}: {h['source']}]\n{h['text']}")
+                    rag_sources.append({"source": h["source"], "score": round(h["score"], 3)})
+
+                context = "\n\n".join(ctx_parts)
+                system = (
+                    f"{system}\n\n"
+                    f"Quyidagi hujjatlardan foydalaning. Agar javob shu hujjatlarda bo'lsa, "
+                    f"faqat ulardan oling — o'zingizdan to'qib chiqarmang. "
+                    f"Agar hujjatlarda yo'q bo'lsa, \"Hujjatlarda topilmadi\" deb yozing.\n\n"
+                    f"=== HUJJATLAR ===\n{context}\n=== HUJJATLAR TUGADI ==="
+                )
+        except Exception as e:
+            print(f"RAG search xato: {e}", flush=True)
 
     messages = [{"role": "system", "content": system}]
     for h in req.history:
@@ -187,7 +266,7 @@ async def chat(req: ChatRequest):
         resp.raise_for_status()
         answer = resp.json()["message"]["content"]
         _log_request(requested, req.message, ms, "ok")
-        return {"response": answer}
+        return {"response": answer, "sources": rag_sources, "rag_used": bool(rag_sources)}
 
     except requests.ConnectionError:
         _log_request(requested, req.message, int((time.time()-t0)*1000), "ollama-down")
