@@ -513,13 +513,21 @@ async def monitor(user: dict = Depends(current_user)):
     else:
         recent = db.list_chat_logs(user["id"], limit=30)
 
+    def _fmt_time(v) -> str:
+        if not v: return ""
+        if hasattr(v, "strftime"):
+            return v.strftime("%H:%M:%S")
+        s = str(v)
+        return s[11:19] if len(s) >= 19 else s
+
     recent_formatted = []
     for r in recent:
+        q = r["question"] or ""
         recent_formatted.append({
-            "time"       : r["created_at"][-8:] if r["created_at"] else "",
-            "user"       : r.get("username", ""),
-            "model"      : r["model"],
-            "question"   : (r["question"][:80] + "…") if len(r["question"]) > 80 else r["question"],
+            "time"       : _fmt_time(r["created_at"]),
+            "user"       : r["username"] if "username" in r.keys() else "",
+            "model"      : r["model"] or "",
+            "question"   : (q[:80] + "…") if len(q) > 80 else q,
             "duration_ms": r["duration_ms"] or 0,
             "status"     : r["status"] or "ok",
             "rag"        : bool(r["rag_used"]),
