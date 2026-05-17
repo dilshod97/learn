@@ -403,6 +403,31 @@ async def my_activity(user: dict = Depends(current_user)):
     }
 
 
+@app.get("/api/chat/history")
+async def chat_history(user: dict = Depends(current_user), limit: int = 100):
+    """Hozirgi user o'zining suhbat tarixini chronological tartibda oladi."""
+    rows = db.list_chat_logs(user["id"], limit=limit)
+    # DB DESC qaytaradi — eskidan yangiga
+    rows = list(reversed(rows))
+    history = []
+    for r in rows:
+        history.append({
+            "question": r["question"] or "",
+            "answer"  : r["answer"] or "",
+            "rag_used": bool(r["rag_used"]),
+            "model"   : r["model"] or "",
+        })
+    return {"history": history}
+
+
+@app.delete("/api/chat/history")
+async def chat_history_clear(user: dict = Depends(current_user)):
+    """User o'z suhbat tarixini tozalaydi."""
+    with db.db() as c:
+        c.execute("DELETE FROM chat_logs WHERE user_id = ?", (user["id"],))
+    return {"ok": True}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ADMIN
 # ══════════════════════════════════════════════════════════════════════════════

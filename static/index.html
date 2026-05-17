@@ -150,6 +150,9 @@
       <span class="text-sm text-slate-300">📚 RAG</span>
       <span id="rag-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">—</span>
     </label>
+    <button onclick="clearChatHistory()" class="text-xs px-3 py-1 rounded-full bg-slate-700 hover:bg-red-900/50 hover:text-red-300 text-slate-400 transition">
+      🗑 Tarixni tozalash
+    </button>
   </div>
   <div id="messages" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-1" style="min-height:0"></div>
   <div class="flex gap-2 shrink-0">
@@ -267,6 +270,9 @@ async function doLogin() {
 async function doLogout() {
   await fetch('/api/auth/logout', {method: 'POST', credentials: 'include'});
   currentUser = null;
+  chatHistory = [];
+  chatLoaded  = false;
+  document.getElementById('messages').innerHTML = '';
   showLogin();
 }
 
@@ -324,6 +330,7 @@ function showTab(name) {
 
   if (name === 'monitor') startMonitor(); else stopMonitor();
   if (name === 'admin')  loadAdminUsers();
+  if (name === 'chat')   loadChatHistory();
 }
 
 document.querySelectorAll('.tab-btn').forEach(b => b.classList.add('tab-inactive'));
@@ -480,6 +487,52 @@ function pollStatus() {
 
 // ── CHAT ─────────────────────────────────────────────────────────────────────
 let chatHistory = [];
+let chatLoaded  = false;
+
+async function loadChatHistory() {
+  if (chatLoaded) return;  // bir martagina yuklaymiz (sahifa ochilganda)
+  try {
+    const d = await (await api('/api/chat/history?limit=50')).json();
+    const box = document.getElementById('messages');
+    box.innerHTML = '';
+    chatHistory = [];
+
+    if (!d.history.length) {
+      const empty = document.createElement('div');
+      empty.className = 'text-slate-500 text-sm italic text-center mt-8';
+      empty.textContent = 'Suhbatlar tarixi bo\'sh. Pastdagi maydondan savol yozing.';
+      box.appendChild(empty);
+    } else {
+      for (const m of d.history) {
+        if (m.question) {
+          appendMessage('user', m.question);
+          chatHistory.push({role: 'user', content: m.question});
+        }
+        if (m.answer) {
+          const bot = appendMessage('assistant', m.answer);
+          if (m.rag_used) {
+            const tag = document.createElement('div');
+            tag.className = 'mt-2 pt-2 border-t border-slate-600/40 text-xs text-purple-400';
+            tag.textContent = '📚 RAG ishlatildi';
+            bot.appendChild(tag);
+          }
+          chatHistory.push({role: 'assistant', content: m.answer});
+        }
+      }
+    }
+    chatLoaded = true;
+    document.getElementById('messages').scrollTop = 99999;
+  } catch(_) {}
+}
+
+async function clearChatHistory() {
+  if (!confirm('Hamma suhbatlar tarixi o\'chirilsinmi?')) return;
+  await api('/api/chat/history', {method: 'DELETE'});
+  chatHistory = [];
+  chatLoaded  = false;
+  document.getElementById('messages').innerHTML = '';
+  loadChatHistory();
+}
 
 async function sendMessage() {
   const inp = document.getElementById('chat-input');
