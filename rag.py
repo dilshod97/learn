@@ -12,7 +12,7 @@ import requests
 from pathlib import Path
 
 OLLAMA_URL  = "http://localhost:11434"
-EMBED_MODEL = "nomic-embed-text:latest"
+EMBED_MODEL = "qwen3-embedding:8b"
 INDEX_FILE  = "rag_index.json"
 
 
