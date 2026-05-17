@@ -11,7 +11,7 @@ import numpy as np
 import requests
 from pathlib import Path
 
-OLLAMA_URL  = "http://localhost:11434"
+OLLAMA_URL  = "http://localhost:11435"
 EMBED_MODEL = "qwen3-embedding:8b"
 INDEX_FILE  = "rag_index.json"
 
