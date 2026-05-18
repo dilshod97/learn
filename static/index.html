@@ -145,6 +145,11 @@
       <option value="gpt-oss:20b">gpt-oss:20b</option>
     </select>
     <button onclick="loadModels()" class="text-xs text-slate-500 hover:text-blue-400">↻</button>
+
+    <button onclick="togglePromptBox()" id="btn-prompt" class="text-xs px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 transition">
+      ⚙️ System prompt
+    </button>
+
     <label class="ml-auto flex items-center gap-2 cursor-pointer">
       <input id="rag-toggle" type="checkbox" class="w-4 h-4 accent-purple-500"/>
       <span class="text-sm text-slate-300">📚 RAG</span>
@@ -153,6 +158,21 @@
     <button onclick="clearChatHistory()" class="text-xs px-3 py-1 rounded-full bg-slate-700 hover:bg-red-900/50 hover:text-red-300 text-slate-400 transition">
       🗑 Tarixni tozalash
     </button>
+  </div>
+
+  <!-- System prompt editor (collapsible) -->
+  <div id="prompt-box" class="hidden bg-slate-900/60 border border-slate-700 rounded-lg p-3 shrink-0">
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-xs text-slate-400">🎯 Sizning system prompt'ingiz (barcha chat rejimlarida ishlatiladi: oddiy, RAG, fine-tuned)</span>
+      <span id="prompt-saved" class="text-xs text-green-400 hidden">✅ Saqlandi</span>
+    </div>
+    <textarea id="system-prompt" rows="4" placeholder="Masalan: 'Siz o'zbek tilidagi rasmiy AI yordamchisiz. Doim hurmat bilan murojaat qiling...'"
+              class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 font-mono"></textarea>
+    <div class="flex gap-2 mt-2">
+      <button onclick="savePrompt()" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs font-medium">💾 Saqlash</button>
+      <button onclick="resetPrompt()" class="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs">↺ Bo'shatish</button>
+      <span class="ml-auto text-xs text-slate-500 self-center">Bo'sh qoldirilsa default prompt ishlatiladi</span>
+    </div>
   </div>
   <div id="messages" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-1" style="min-height:0"></div>
   <div class="flex gap-2 shrink-0">
@@ -269,10 +289,12 @@ async function doLogin() {
 
 async function doLogout() {
   await fetch('/api/auth/logout', {method: 'POST', credentials: 'include'});
-  currentUser = null;
-  chatHistory = [];
-  chatLoaded  = false;
+  currentUser  = null;
+  chatHistory  = [];
+  chatLoaded   = false;
+  promptLoaded = false;
   document.getElementById('messages').innerHTML = '';
+  document.getElementById('system-prompt').value = '';
   showLogin();
 }
 
@@ -485,11 +507,68 @@ function pollStatus() {
   }, 2000);
 }
 
+// ── SYSTEM PROMPT ────────────────────────────────────────────────────────────
+let promptLoaded = false;
+
+function togglePromptBox() {
+  const box = document.getElementById('prompt-box');
+  box.classList.toggle('hidden');
+  if (!box.classList.contains('hidden')) loadPrompt();
+}
+
+async function loadPrompt() {
+  if (promptLoaded) return;
+  try {
+    const d = await (await api('/api/settings')).json();
+    document.getElementById('system-prompt').value = d.system_prompt || '';
+    promptLoaded = true;
+    updatePromptBadge(d.system_prompt);
+  } catch(_) {}
+}
+
+async function savePrompt() {
+  const val = document.getElementById('system-prompt').value;
+  try {
+    const res = await api('/api/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({system_prompt: val}),
+    });
+    if (res.ok) {
+      const ok = document.getElementById('prompt-saved');
+      ok.classList.remove('hidden');
+      setTimeout(() => ok.classList.add('hidden'), 2000);
+      updatePromptBadge(val);
+    }
+  } catch(e) { alert('Saqlanmadi: ' + e.message); }
+}
+
+async function resetPrompt() {
+  document.getElementById('system-prompt').value = '';
+  await savePrompt();
+}
+
+function updatePromptBadge(val) {
+  const btn = document.getElementById('btn-prompt');
+  if (val && val.trim()) {
+    btn.className = 'text-xs px-3 py-1 rounded-full bg-blue-900/50 text-blue-300 hover:bg-blue-900/70 transition';
+    btn.textContent = '⚙️ Custom prompt yoqilgan';
+  } else {
+    btn.className = 'text-xs px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 transition';
+    btn.textContent = '⚙️ System prompt';
+  }
+}
+
 // ── CHAT ─────────────────────────────────────────────────────────────────────
 let chatHistory = [];
 let chatLoaded  = false;
 
 async function loadChatHistory() {
+  // Prompt badge holatini ham yangilab qo'yamiz
+  try {
+    const d = await (await api('/api/settings')).json();
+    updatePromptBadge(d.system_prompt);
+  } catch(_) {}
+
   if (chatLoaded) return;  // bir martagina yuklaymiz (sahifa ochilganda)
   try {
     const d = await (await api('/api/chat/history?limit=50')).json();

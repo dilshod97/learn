@@ -82,6 +82,12 @@ def init_db():
             error        TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            system_prompt  TEXT DEFAULT '',
+            updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE INDEX IF NOT EXISTS idx_files_user      ON files(user_id);
         CREATE INDEX IF NOT EXISTS idx_chat_user_time  ON chat_logs(user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_train_user_time ON training_jobs(user_id, started_at DESC);
@@ -296,6 +302,27 @@ def update_training_job(job_id: int, status: str, error: Optional[str] = None):
             SET status = ?, error = ?, finished_at = {finished}
             WHERE id = ?
         """, (status, error, job_id))
+
+
+def get_user_settings(user_id: int) -> dict:
+    with db() as c:
+        row = c.execute(
+            "SELECT system_prompt FROM user_settings WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if row:
+            return {"system_prompt": row["system_prompt"] or ""}
+        return {"system_prompt": ""}
+
+
+def set_user_settings(user_id: int, system_prompt: str):
+    with db() as c:
+        c.execute("""
+            INSERT INTO user_settings (user_id, system_prompt, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                system_prompt = excluded.system_prompt,
+                updated_at    = CURRENT_TIMESTAMP
+        """, (user_id, system_prompt))
 
 
 def list_training_jobs(user_id: Optional[int] = None, limit: int = 50) -> list[dict]:

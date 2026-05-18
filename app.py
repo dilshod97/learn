@@ -329,7 +329,13 @@ async def chat(req: ChatReq, user: dict = Depends(current_user)):
     if actual == "uzbek-gpt-local":
         actual = "gpt-oss:20b"
 
-    system = "Siz o'zbek tilidagi AI yordamchisiz."
+    # User saqlagan custom prompt — bo'lmasa default
+    settings = db.get_user_settings(uid)
+    base_prompt = settings.get("system_prompt", "").strip()
+    if not base_prompt:
+        base_prompt = "Siz o'zbek tilidagi AI yordamchisiz."
+
+    system  = base_prompt
     sources = []
     rag = _user_rag(uid)
 
@@ -401,6 +407,21 @@ async def my_activity(user: dict = Depends(current_user)):
         "chats"   : db.list_chat_logs(user["id"], limit=30),
         "trainings": db.list_training_jobs(user["id"], limit=20),
     }
+
+
+class SettingsReq(BaseModel):
+    system_prompt: str = ""
+
+
+@app.get("/api/settings")
+async def get_settings(user: dict = Depends(current_user)):
+    return db.get_user_settings(user["id"])
+
+
+@app.patch("/api/settings")
+async def update_settings(req: SettingsReq, user: dict = Depends(current_user)):
+    db.set_user_settings(user["id"], req.system_prompt.strip())
+    return {"ok": True}
 
 
 @app.get("/api/chat/history")
