@@ -1,12 +1,43 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Baza va RAG indekslari (har bir muhit alohida)
+app.db
+app.db-journal
+app.db-wal
+app.db-shm
+rag_index*.json
+
+# Loglar va PID
 app.log
-app.pid
+*.log
 *.pid
-llama.cpp/
-uploads/*
-!uploads/.gitkeep
-uzbek-gpt-lora/
-uzbek-gpt-merged/
+
+# Training natijalar
+uzbek-gpt-lora*/
+uzbek-gpt-merged*/
 *.gguf
+uzbek_dataset*.json
+Modelfile
+
+# Foydalanuvchi yuklagan fayllar
+uploads/*/
+!uploads/.gitkeep
+
+# llama.cpp
+llama.cpp/
+
+# IDE va OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
