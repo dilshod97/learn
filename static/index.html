@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>O'zbek GPT — Multi-user</title>
+  <title>HP-AI Audit Assistant</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body{background:#0f172a}
@@ -27,6 +27,9 @@
     .gauge-red{background:linear-gradient(90deg,#ef4444,#b91c1c)}
     #login-screen{position:fixed;inset:0;background:#0f172a;z-index:9999;display:flex;align-items:center;justify-content:center}
     #login-screen.hidden{display:none}
+    .admin-tab{background:transparent;color:#94a3b8;border-bottom:2px solid transparent;margin-bottom:-1px}
+    .admin-tab:hover{color:#cbd5e1;background:#1e293b}
+    .admin-tab.active{background:#1e40af;color:#fff;border-bottom-color:#3b82f6}
   </style>
 </head>
 <body class="text-slate-100 min-h-screen flex flex-col">
@@ -35,9 +38,9 @@
 <div id="login-screen">
   <div class="bg-slate-800 rounded-2xl p-8 w-full max-w-sm border border-slate-700 shadow-2xl">
     <div class="flex items-center gap-3 mb-6">
-      <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold">G</div>
+      <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold">HP</div>
       <div>
-        <div class="font-semibold">O'zbek GPT</div>
+        <div class="font-semibold">HP-AI Audit Assistant</div>
         <div class="text-xs text-slate-400">Multi-user panel</div>
       </div>
     </div>
@@ -66,8 +69,8 @@
 <!-- Header -->
 <header class="border-b border-slate-700 px-6 py-3 flex items-center justify-between shrink-0">
   <div class="flex items-center gap-3">
-    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-sm">G</div>
-    <span class="font-semibold text-lg">O'zbek GPT</span>
+    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-xs">HP</div>
+    <span class="font-semibold text-lg">HP-AI Audit Assistant</span>
   </div>
   <div class="flex items-center gap-3">
     <span id="user-badge" class="text-xs px-3 py-1 rounded-full bg-slate-700 text-slate-300">—</span>
@@ -217,11 +220,11 @@
 
 <!-- ══ ADMIN ══ -->
 <div id="tab-admin-content" class="tab-content bg-slate-800 rounded-b rounded-tr p-6 hidden overflow-y-auto" style="max-height:calc(100vh - 160px)">
-  <div class="flex gap-2 mb-5 border-b border-slate-700">
-    <button onclick="showAdminSection('users')"     class="admin-tab px-3 py-2 text-sm">👥 Foydalanuvchilar</button>
-    <button onclick="showAdminSection('files')"     class="admin-tab px-3 py-2 text-sm">📁 Barcha fayllar</button>
-    <button onclick="showAdminSection('chats')"     class="admin-tab px-3 py-2 text-sm">💬 Barcha suhbatlar</button>
-    <button onclick="showAdminSection('trainings')" class="admin-tab px-3 py-2 text-sm">⚙️ Training jurnali</button>
+  <div class="flex gap-1 mb-5 border-b border-slate-700">
+    <button data-section="users"     onclick="showAdminSection('users')"     class="admin-tab px-4 py-2 text-sm rounded-t transition">👥 Foydalanuvchilar</button>
+    <button data-section="files"     onclick="showAdminSection('files')"     class="admin-tab px-4 py-2 text-sm rounded-t transition">📁 Barcha fayllar</button>
+    <button data-section="chats"     onclick="showAdminSection('chats')"     class="admin-tab px-4 py-2 text-sm rounded-t transition">💬 Barcha suhbatlar</button>
+    <button data-section="trainings" onclick="showAdminSection('trainings')" class="admin-tab px-4 py-2 text-sm rounded-t transition">⚙️ Training jurnali</button>
   </div>
 
   <!-- USERS -->
@@ -394,7 +397,8 @@ async function loadFiles() {
       <span class="text-green-400">✓</span>
       <span class="text-slate-200 flex-1 truncate">${escapeHtml(f.filename)}</span>
       <span class="text-slate-500 text-xs">${(f.size_bytes/1024).toFixed(1)} KB</span>
-      <button onclick="deleteFile(${f.id})" class="text-red-400 hover:text-red-300 text-xs ml-2">🗑</button>
+      <a href="/api/files/${f.id}/download" download class="text-blue-400 hover:text-blue-300 text-xs ml-2" title="Yuklab olish">⬇</a>
+      <button onclick="deleteFile(${f.id})" class="text-red-400 hover:text-red-300 text-xs ml-1" title="O'chirish">🗑</button>
     </div>
   `).join('');
 
@@ -788,7 +792,11 @@ function renderRecent(reqs, isAdmin) {
 // ── ADMIN ────────────────────────────────────────────────────────────────────
 function showAdminSection(name) {
   document.querySelectorAll('.admin-section').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
   document.getElementById('admin-' + name).classList.remove('hidden');
+  const btn = document.querySelector(`.admin-tab[data-section="${name}"]`);
+  if (btn) btn.classList.add('active');
+
   if (name === 'users')     loadAdminUsers();
   if (name === 'files')     loadAdminFiles();
   if (name === 'chats')     loadAdminChats();
@@ -859,17 +867,32 @@ async function loadAdminFiles() {
   document.getElementById('admin-files').innerHTML = `
   <table class="w-full text-sm">
     <thead><tr class="text-xs text-slate-400 border-b border-slate-700">
-      <th class="text-left px-3 py-2">User</th><th class="text-left px-3 py-2">Fayl</th>
-      <th class="text-right px-3 py-2">Hajm</th><th class="text-left px-3 py-2">Vaqt</th>
+      <th class="text-left px-3 py-2">User</th>
+      <th class="text-left px-3 py-2">Fayl</th>
+      <th class="text-right px-3 py-2">Hajm</th>
+      <th class="text-left px-3 py-2">Vaqt</th>
+      <th class="text-center px-3 py-2">Amallar</th>
     </tr></thead>
     <tbody class="divide-y divide-slate-700/30">
-      ${d.files.map(f => `<tr>
+      ${d.files.map(f => `<tr class="hover:bg-slate-700/20">
         <td class="px-3 py-2 text-yellow-300 text-xs">${escapeHtml(f.username)}</td>
         <td class="px-3 py-2">${escapeHtml(f.filename)}</td>
         <td class="px-3 py-2 text-right text-xs font-mono">${(f.size_bytes/1024).toFixed(1)} KB</td>
-        <td class="px-3 py-2 text-xs text-slate-500">${f.uploaded_at?.slice(0,16) || ''}</td>
+        <td class="px-3 py-2 text-xs text-slate-500">${(f.uploaded_at || '').slice(0,16)}</td>
+        <td class="px-3 py-2 text-center">
+          <a href="/api/files/${f.id}/download" download
+             class="inline-block px-2 py-0.5 bg-blue-900/40 hover:bg-blue-800 text-blue-300 rounded text-xs mr-1" title="Yuklab olish">⬇ Yuklab olish</a>
+          <button onclick="adminDeleteFile(${f.id})"
+             class="px-2 py-0.5 bg-red-900/40 hover:bg-red-800 text-red-300 rounded text-xs" title="O'chirish">🗑</button>
+        </td>
       </tr>`).join('')}
     </tbody></table>`;
+}
+
+async function adminDeleteFile(id) {
+  if (!confirm('Bu fayl o\'chirilsinmi?')) return;
+  await api(`/api/files/${id}`, {method: 'DELETE'});
+  loadAdminFiles();
 }
 
 async function loadAdminChats() {

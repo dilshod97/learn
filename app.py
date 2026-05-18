@@ -13,7 +13,7 @@ import uvicorn
 import psutil
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Depends, Header, Cookie, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -64,7 +64,7 @@ def _user_trainer(uid: int) -> Trainer:
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(title="O'zbek GPT — Multi-user")
+app = FastAPI(title="HP-AI Audit Assistant")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -498,6 +498,20 @@ async def admin_delete_user(uid: int, admin: dict = Depends(admin_required)):
 @app.get("/api/admin/files")
 async def admin_all_files(admin: dict = Depends(admin_required)):
     return {"files": db.list_files()}
+
+
+@app.get("/api/files/{file_id}/download")
+async def download_file(file_id: int, user: dict = Depends(current_user)):
+    """User o'z faylini yuklab oladi, admin esa hammasini."""
+    f = db.get_file(file_id)
+    if not f:
+        raise HTTPException(404, "Fayl topilmadi")
+    if f["user_id"] != user["id"] and user["role"] != "admin":
+        raise HTTPException(403, "Boshqa user fayli")
+    path = Path(f["path"])
+    if not path.exists():
+        raise HTTPException(404, "Fayl diskda yo'q")
+    return FileResponse(str(path), filename=f["filename"], media_type="application/octet-stream")
 
 
 @app.get("/api/admin/chats")
