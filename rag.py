@@ -10,6 +10,7 @@ import json
 import numpy as np
 import requests
 from pathlib import Path
+from file_reader import read_file_text
 
 OLLAMA_URL  = "http://localhost:11435"
 EMBED_MODEL = "qwen3-embedding:8b"
@@ -81,29 +82,51 @@ class RAGIndex:
 
     def stats(self) -> dict:
         sources = {}
+        contributors = {}
         for c in self.chunks:
             sources[c["source"]] = sources.get(c["source"], 0) + 1
+            u = c.get("uploaded_by", "—")
+            contributors[u] = contributors.get(u, 0) + 1
         return {
             "total_chunks": len(self.chunks),
             "sources"     : sources,
+            "contributors": contributors,
         }
 
     # ── Build ──────────────────────────────────────────────────────────────
-    def build(self, files: list[str], log=None) -> int:
+    def build(self, files: list, log=None) -> int:
+        """
+        files: list of dict {path, source, uploaded_by} yoki oddiy string list.
+        """
         self.chunks = []
 
-        for fpath in files:
+        norm = []
+        for f in files:
+            if isinstance(f, str):
+                norm.append({"path": f, "source": Path(f).name, "uploaded_by": "—"})
+            else:
+                norm.append({
+                    "path"       : f["path"],
+                    "source"     : f.get("source") or Path(f["path"]).name,
+                    "uploaded_by": f.get("uploaded_by", "—"),
+                })
+
+        for item in norm:
             try:
-                raw   = Path(fpath).read_text(encoding="utf-8")
-                fname = Path(fpath).name
+                raw   = read_file_text(item["path"])
                 parts = _chunk_text(raw)
                 if log:
-                    log(f"   📄 {fname} → {len(parts)} ta chunk")
+                    log(f"   📄 {item['source']} (👤 {item['uploaded_by']}) → {len(parts)} ta chunk")
                 for chunk in parts:
-                    self.chunks.append({"text": chunk, "emb": None, "source": fname})
+                    self.chunks.append({
+                        "text"       : chunk,
+                        "emb"        : None,
+                        "source"     : item["source"],
+                        "uploaded_by": item["uploaded_by"],
+                    })
             except Exception as e:
                 if log:
-                    log(f"   ✗ {fpath}: {e}")
+                    log(f"   ✗ {item['source']}: {e}")
 
         if not self.chunks:
             raise ValueError("Fayllardan chunk ajratib bo'lmadi")
@@ -128,7 +151,9 @@ class RAGIndex:
             return []
         q_emb = _embed(query)
         scored = [
-            {"text": item["text"], "source": item["source"],
+            {"text": item["text"],
+             "source": item["source"],
+             "uploaded_by": item.get("uploaded_by", "—"),
              "score": _cosine(q_emb, item["emb"])}
             for item in self.chunks
         ]

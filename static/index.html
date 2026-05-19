@@ -99,23 +99,24 @@
        ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
     <div class="text-4xl mb-3">📂</div>
     <p class="text-slate-300 font-medium">Fayllarni tashlang yoki bosing</p>
-    <p class="text-slate-500 text-sm mt-1">Bir xil fayl ikki marta yuklanmaydi</p>
-    <input id="file-input" type="file" multiple accept=".txt,.pdf,.docx,.csv,.json" class="hidden" onchange="uploadFiles(this.files)"/>
+    <p class="text-slate-500 text-sm mt-1">Faqat <span class="text-blue-300">.txt</span> va <span class="text-blue-300">.docx</span> · Bir xil fayl ikki marta yuklanmaydi</p>
+    <input id="file-input" type="file" multiple accept=".txt,.docx" class="hidden" onchange="uploadFiles(this.files)"/>
   </div>
 
   <div id="file-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
 
-  <div id="rag-status" class="hidden bg-blue-900/30 border border-blue-700/50 rounded-lg p-3 text-sm">
+  <div id="rag-status" class="bg-purple-900/20 border border-purple-700/40 rounded-lg p-3 text-sm">
     <div class="flex items-center justify-between mb-1">
-      <span class="font-medium text-blue-300">📚 RAG holati</span>
-      <span id="rag-stats" class="text-xs text-blue-200">—</span>
+      <span class="font-medium text-purple-300">🌍 Umumiy bilim bazasi (barcha userlar uchun)</span>
+      <span id="rag-stats" class="text-xs text-purple-200">—</span>
     </div>
-    <div id="rag-logs" class="text-xs text-slate-400 max-h-24 overflow-y-auto font-mono"></div>
+    <div id="rag-contributors" class="text-xs text-slate-400 mb-2"></div>
+    <div id="rag-logs" class="text-xs text-slate-500 max-h-24 overflow-y-auto font-mono"></div>
   </div>
 
   <div class="flex flex-wrap gap-3">
-    <button id="btn-rag" onclick="buildRAG()" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg font-medium" disabled>
-      📚 RAG indeksini qurish
+    <button id="btn-rag" onclick="buildRAG()" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg font-medium">
+      🌍 Umumiy bazani yangilash
     </button>
     <button id="btn-train" onclick="startTraining()" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-lg font-medium" disabled>
       🚀 Fine-Tuning
@@ -375,7 +376,14 @@ async function uploadFiles(files) {
   const data = await res.json();
 
   const dups = data.results.filter(r => r.status === 'duplicate');
-  if (dups.length) alert('Bu fayllar avval yuklangan:\n' + dups.map(d => '• ' + d.name).join('\n'));
+  const bad  = data.results.filter(r => r.status === 'bad-format');
+  const empty = data.results.filter(r => r.status === 'empty');
+
+  let msg = '';
+  if (bad.length)   msg += '❌ Noto\'g\'ri format (faqat .txt va .docx):\n' + bad.map(d => '• ' + d.name).join('\n') + '\n\n';
+  if (dups.length)  msg += '⚠️ Avval yuklangan:\n' + dups.map(d => '• ' + d.name).join('\n') + '\n\n';
+  if (empty.length) msg += '⚠️ Bo\'sh fayllar:\n' + empty.map(d => '• ' + d.name).join('\n');
+  if (msg) alert(msg.trim());
 
   loadFiles();
 }
@@ -435,19 +443,34 @@ async function buildRAG() {
   startRAGPoll();
 }
 
+function renderRagStatusBox(d) {
+  document.getElementById('rag-logs').innerHTML = (d.logs || []).map(l => `<div>${escapeHtml(l)}</div>`).join('');
+
+  const totalFiles = Object.keys(d.stats?.sources || {}).length;
+  document.getElementById('rag-stats').textContent =
+    d.ready ? `${d.stats.total_chunks} chunk · ${totalFiles} fayl` :
+    d.building ? 'qurilmoqda...' : 'tayyor emas';
+
+  // Contributors (kim qancha chunk qo'shgan)
+  const contrib = d.stats?.contributors || {};
+  const contribEl = document.getElementById('rag-contributors');
+  if (Object.keys(contrib).length) {
+    contribEl.innerHTML = '👥 Hissa: ' + Object.entries(contrib)
+      .map(([u, n]) => `<span class="inline-block bg-slate-700/60 text-slate-300 rounded px-2 py-0.5 mr-1 mb-1 text-xs">${escapeHtml(u)}: ${n}</span>`)
+      .join('');
+  } else { contribEl.innerHTML = ''; }
+}
+
 function startRAGPoll() {
   if (ragPoll) clearInterval(ragPoll);
   ragPoll = setInterval(async () => {
     const d = await (await api('/api/rag/status')).json();
-    document.getElementById('rag-logs').innerHTML = d.logs.map(l => `<div>${escapeHtml(l)}</div>`).join('');
-    document.getElementById('rag-stats').textContent =
-      d.ready ? `${d.stats.total_chunks} chunk, ${Object.keys(d.stats.sources).length} fayl` :
-      d.building ? 'qurilmoqda...' : 'tayyor emas';
+    renderRagStatusBox(d);
     if (!d.building) {
       clearInterval(ragPoll);
       const btn = document.getElementById('btn-rag');
       btn.disabled = false;
-      btn.textContent = d.ready ? '✅ RAG tayyor (qayta qurish)' : '📚 RAG indeksini qurish';
+      btn.textContent = d.ready ? '✅ Baza tayyor (qayta qurish)' : '🌍 Umumiy bazani qurish';
       checkRAG();
     }
   }, 1000);
@@ -456,6 +479,11 @@ function startRAGPoll() {
 async function checkRAG() {
   try {
     const d = await (await api('/api/rag/status')).json();
+    renderRagStatusBox(d);
+
+    const btn = document.getElementById('btn-rag');
+    if (btn) btn.textContent = d.ready ? '✅ Baza tayyor (qayta qurish)' : '🌍 Umumiy bazani qurish';
+
     const badge = document.getElementById('rag-badge');
     if (d.ready) {
       badge.className = 'text-xs px-2 py-0.5 rounded-full bg-purple-900/50 text-purple-300';
@@ -643,7 +671,10 @@ async function sendMessage() {
         const src = document.createElement('div');
         src.className = 'mt-2 pt-2 border-t border-slate-600/40 text-xs';
         src.innerHTML = '<div class="text-purple-400 mb-1">📚 Manbalar:</div>' +
-          data.sources.map(s => `<span class="inline-block bg-purple-900/30 text-purple-300 rounded px-2 py-0.5 mr-1 mb-1">📄 ${escapeHtml(s.source)} (${(s.score*100).toFixed(0)}%)</span>`).join('');
+          data.sources.map(s => {
+            const who = s.uploaded_by ? ` <span class="opacity-70">· 👤 ${escapeHtml(s.uploaded_by)}</span>` : '';
+            return `<span class="inline-block bg-purple-900/30 text-purple-300 rounded px-2 py-0.5 mr-1 mb-1">📄 ${escapeHtml(s.source)} (${(s.score*100).toFixed(0)}%)${who}</span>`;
+          }).join('');
         typing.appendChild(src);
       }
       chatHistory.push({role: 'assistant', content: data.response});

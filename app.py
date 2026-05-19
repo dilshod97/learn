@@ -20,6 +20,7 @@ from pydantic import BaseModel
 import db
 from rag import RAGIndex, is_embed_available, EMBED_MODEL
 from trainer import Trainer
+from file_reader import ALLOWED_EXT
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 db.init_db()
@@ -32,25 +33,21 @@ OLLAMA_URL = "http://localhost:11435"
 
 # Per-user holatlar (xotirada)
 user_states: dict[int, dict] = {}
-user_rags  : dict[int, RAGIndex] = {}
 user_trainers: dict[int, Trainer] = {}
+
+# ── Global (umumiy) RAG — barcha userlar uchun bitta bilim bazasi ─────────────
+GLOBAL_RAG_FILE = "rag_index_global.json"
+global_rag = RAGIndex()
+global_rag.load(GLOBAL_RAG_FILE)
+global_rag_state = {"building": False, "logs": []}
 
 
 def _ensure_user_state(uid: int) -> dict:
     if uid not in user_states:
         user_states[uid] = {
             "training": {"status": "idle", "progress": 0, "logs": []},
-            "rag"     : {"building": False, "logs": []},
         }
     return user_states[uid]
-
-
-def _user_rag(uid: int) -> RAGIndex:
-    if uid not in user_rags:
-        r = RAGIndex()
-        r.load(f"rag_index_{uid}.json")
-        user_rags[uid] = r
-    return user_rags[uid]
 
 
 def _user_trainer(uid: int) -> Trainer:
@@ -137,6 +134,12 @@ async def upload_files(files: list[UploadFile] = File(...), user: dict = Depends
 
     results = []
     for f in files:
+        # Faqat .txt va .docx ruxsat etiladi
+        ext = os.path.splitext(f.filename or "")[1].lower()
+        if ext not in ALLOWED_EXT:
+            results.append({"name": f.filename, "status": "bad-format"})
+            continue
+
         content = await f.read()
         if not content:
             results.append({"name": f.filename, "status": "empty"})
@@ -197,61 +200,62 @@ async def clear_files(user: dict = Depends(current_user)):
     return {"ok": True}
 
 
-# ── RAG ───────────────────────────────────────────────────────────────────────
-def _build_rag_bg(uid: int, files: list[str]):
-    st = _ensure_user_state(uid)["rag"]
-    rag = _user_rag(uid)
-    job_id = db.add_training_job(uid, "rag", "running")
+# ── Global RAG ────────────────────────────────────────────────────────────────
+def _build_global_rag_bg(builder_uid: int, file_specs: list[dict]):
+    job_id = db.add_training_job(builder_uid, "rag", "running")
     try:
-        st["building"] = True
-        st["logs"]     = []
-        st["logs"].append("📚 RAG index qurilmoqda...")
-        rag.build(files, log=lambda m: st["logs"].append(m))
-        rag.save(f"rag_index_{uid}.json")
+        global_rag_state["building"] = True
+        global_rag_state["logs"]     = []
+        global_rag_state["logs"].append(
+            f"📚 Umumiy bilim bazasi qurilmoqda ({len(file_specs)} ta fayl)..."
+        )
+        global_rag.build(file_specs, log=lambda m: global_rag_state["logs"].append(m))
+        global_rag.save(GLOBAL_RAG_FILE)
         db.update_training_job(job_id, "done")
     except Exception as e:
-        st["logs"].append(f"❌ Xato: {e}")
+        global_rag_state["logs"].append(f"❌ Xato: {e}")
         db.update_training_job(job_id, "error", str(e))
     finally:
-        st["building"] = False
+        global_rag_state["building"] = False
 
 
 @app.post("/api/rag/build")
 async def rag_build(background_tasks: BackgroundTasks, user: dict = Depends(current_user)):
-    uid = user["id"]
-    st  = _ensure_user_state(uid)["rag"]
-    if st["building"]:
-        raise HTTPException(400, "RAG hozir qurilmoqda")
+    if global_rag_state["building"]:
+        raise HTTPException(400, "RAG hozir qurilmoqda (boshqa user tomonidan)")
 
-    files = db.list_files(uid)
-    if not files:
-        raise HTTPException(400, "Avval fayl yuklang")
+    # Barcha userlarning barcha fayllari
+    all_files = db.list_files()
+    if not all_files:
+        raise HTTPException(400, "Hech qanday fayl yo'q")
     if not is_embed_available():
         raise HTTPException(400, f"{EMBED_MODEL} Ollama'da topilmadi")
 
-    paths = [f["path"] for f in files]
-    background_tasks.add_task(_build_rag_bg, uid, paths)
-    return {"message": "RAG quriliyapti"}
+    specs = [{
+        "path"       : f["path"],
+        "source"     : f["filename"],
+        "uploaded_by": f["username"],
+    } for f in all_files]
+
+    background_tasks.add_task(_build_global_rag_bg, user["id"], specs)
+    return {"message": "Umumiy RAG quriliyapti"}
 
 
 @app.get("/api/rag/status")
 async def rag_status(user: dict = Depends(current_user)):
-    uid = user["id"]
-    st  = _ensure_user_state(uid)["rag"]
-    rag = _user_rag(uid)
     return {
-        "ready"   : rag.ready,
-        "building": st["building"],
-        "stats"   : rag.stats(),
-        "logs"    : st["logs"][-30:],
+        "ready"   : global_rag.ready,
+        "building": global_rag_state["building"],
+        "stats"   : global_rag.stats(),
+        "logs"    : global_rag_state["logs"][-30:],
     }
 
 
 @app.delete("/api/rag")
-async def rag_clear(user: dict = Depends(current_user)):
-    uid = user["id"]
-    _user_rag(uid).clear()
-    p = Path(f"rag_index_{uid}.json")
+async def rag_clear(admin: dict = Depends(admin_required)):
+    """Faqat admin RAG'ni tozalashi mumkin."""
+    global_rag.clear()
+    p = Path(GLOBAL_RAG_FILE)
     if p.exists():
         p.unlink()
     return {"ok": True}
@@ -337,14 +341,20 @@ async def chat(req: ChatReq, user: dict = Depends(current_user)):
 
     system  = base_prompt
     sources = []
-    rag = _user_rag(uid)
 
-    if req.use_rag and rag.ready:
+    if req.use_rag and global_rag.ready:
         try:
-            hits = rag.search(req.message, top_k=4, threshold=0.3)
+            hits = global_rag.search(req.message, top_k=5, threshold=0.3)
             if hits:
-                ctx = "\n\n".join(f"[Manba {i+1}: {h['source']}]\n{h['text']}" for i,h in enumerate(hits))
-                sources = [{"source": h["source"], "score": round(h["score"], 3)} for h in hits]
+                ctx_parts = []
+                for i, h in enumerate(hits, 1):
+                    ctx_parts.append(f"[Manba {i}: {h['source']} — yuklagan: {h['uploaded_by']}]\n{h['text']}")
+                    sources.append({
+                        "source"     : h["source"],
+                        "uploaded_by": h["uploaded_by"],
+                        "score"      : round(h["score"], 3),
+                    })
+                ctx = "\n\n".join(ctx_parts)
                 system = (f"{system}\n\nQuyidagi hujjatlardan foydalaning. Faqat ulardan oling, "
                           f"to'qib chiqarmang. Topilmasa 'Hujjatlarda topilmadi' deb yozing.\n\n"
                           f"=== HUJJATLAR ===\n{ctx}\n=== TUGADI ===")

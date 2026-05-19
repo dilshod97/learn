@@ -66,11 +66,12 @@ class Trainer:
     def prepare_dataset(self, files: list):
         self.log("📖 Dataset tayyorlanmoqda...")
 
+        from file_reader import read_file_text
+
         raw = ""
         for fpath in files:
             try:
-                with open(fpath, "r", encoding="utf-8") as f:
-                    raw += f.read() + "\n\n"
+                raw += read_file_text(fpath) + "\n\n"
                 self.log(f"   ✓ {Path(fpath).name}")
             except Exception as e:
                 self.log(f"   ✗ {fpath}: {e}")

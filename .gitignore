@@ -15,6 +15,7 @@ app.db-journal
 app.db-wal
 app.db-shm
 rag_index*.json
+rag_index_global.json
 
 # Loglar va PID
 app.log
