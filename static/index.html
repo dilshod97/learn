@@ -675,7 +675,14 @@ async function sendMessage() {
   const model = document.getElementById('model-select').value;
   const useRag = document.getElementById('rag-toggle').checked;
   const typing = appendMessage('assistant', '');
-  typing.innerHTML = '<span class="spin text-blue-400">⏳</span>';
+
+  // Live timer
+  const t0 = Date.now();
+  typing.innerHTML = '<span class="flex items-center gap-2"><span class="spin text-blue-400">⏳</span><span class="text-slate-400 text-xs">O\'ylanmoqda <span id="live-timer">0.0s</span>...</span></span>';
+  const timer = setInterval(() => {
+    const el = document.getElementById('live-timer');
+    if (el) el.textContent = ((Date.now() - t0) / 1000).toFixed(1) + 's';
+  }, 100);
 
   try {
     const res = await api('/api/chat', {
@@ -683,10 +690,20 @@ async function sendMessage() {
       body: JSON.stringify({message: msg, history: chatHistory.slice(0,-1), model, use_rag: useRag}),
     });
     const data = await res.json();
+    clearInterval(timer);
     if (!res.ok) {
       typing.textContent = '⚠️ ' + (data.detail || 'Xato');
     } else {
       renderAssistantContent(typing, data.response);
+
+      // ⏱ Duration badge
+      const ms = data.duration_ms ?? (Date.now() - t0);
+      const meta = document.createElement('div');
+      meta.className = 'mt-2 pt-2 border-t border-slate-600/40 text-xs text-slate-500 flex items-center gap-3';
+      meta.innerHTML = `<span>🕐 ${(ms/1000).toFixed(1)}s</span>`;
+      if (data.rag_used) meta.innerHTML += '<span class="text-purple-400">📚 RAG</span>';
+      typing.appendChild(meta);
+
       if (data.rag_used && data.sources?.length) {
         const src = document.createElement('div');
         src.className = 'mt-2 pt-2 border-t border-slate-600/40 text-xs';
@@ -700,6 +717,7 @@ async function sendMessage() {
       chatHistory.push({role: 'assistant', content: data.response});
     }
   } catch(e) {
+    clearInterval(timer);
     typing.textContent = '⚠️ ' + e.message;
   }
   document.getElementById('messages').scrollTop = 99999;

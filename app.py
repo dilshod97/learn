@@ -388,7 +388,12 @@ async def chat(req: ChatReq, user: dict = Depends(current_user)):
         r.raise_for_status()
         answer = r.json()["message"]["content"]
         db.add_chat_log(uid, actual, req.message, answer, bool(sources), ms, "ok")
-        return {"response": answer, "sources": sources, "rag_used": bool(sources)}
+        return {
+            "response"   : answer,
+            "sources"    : sources,
+            "rag_used"   : bool(sources),
+            "duration_ms": ms,
+        }
 
     except requests.ConnectionError:
         db.add_chat_log(uid, actual, req.message, "", bool(sources), int((time.time()-t0)*1000), "ollama-down")
