@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>HP-AI Audit Assistant</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body{background:#0f172a}
     .tab-active{background:#1e40af;color:#fff}
@@ -30,6 +32,24 @@
     .admin-tab{background:transparent;color:#94a3b8;border-bottom:2px solid transparent;margin-bottom:-1px}
     .admin-tab:hover{color:#cbd5e1;background:#1e293b}
     .admin-tab.active{background:#1e40af;color:#fff;border-bottom-color:#3b82f6}
+
+    /* Markdown content stilizatsiyasi */
+    .md-content h1,.md-content h2,.md-content h3{font-weight:600;margin:.6em 0 .3em;color:#e2e8f0}
+    .md-content h1{font-size:1.2em} .md-content h2{font-size:1.1em} .md-content h3{font-size:1.05em}
+    .md-content p{margin:.4em 0}
+    .md-content ul,.md-content ol{margin:.4em 0 .4em 1.2em;list-style:revert}
+    .md-content strong{color:#fafafa;font-weight:600}
+    .md-content em{color:#cbd5e1}
+    .md-content code:not(pre code){background:#0f172a;color:#fbbf24;padding:1px 5px;border-radius:3px;font-size:.9em}
+    .md-content pre{background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 12px;overflow-x:auto;margin:.6em 0;font-size:.85em}
+    .md-content table{border-collapse:collapse;margin:.6em 0;width:100%;font-size:.85em}
+    .md-content th,.md-content td{border:1px solid #334155;padding:6px 10px;text-align:left}
+    .md-content th{background:#1e3a8a;color:#fff;font-weight:600}
+    .md-content tr:nth-child(even) td{background:#0f172a55}
+    .md-content blockquote{border-left:3px solid #3b82f6;padding-left:10px;margin:.5em 0;color:#cbd5e1}
+    .md-content hr{border:0;border-top:1px solid #334155;margin:.8em 0}
+    .chart-container{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;margin:.6em 0}
+    .chart-container canvas{max-height:300px}
   </style>
 </head>
 <body class="text-slate-100 min-h-screen flex flex-col">
@@ -666,7 +686,7 @@ async function sendMessage() {
     if (!res.ok) {
       typing.textContent = '⚠️ ' + (data.detail || 'Xato');
     } else {
-      typing.textContent = data.response;
+      renderAssistantContent(typing, data.response);
       if (data.rag_used && data.sources?.length) {
         const src = document.createElement('div');
         src.className = 'mt-2 pt-2 border-t border-slate-600/40 text-xs';
@@ -688,10 +708,85 @@ async function sendMessage() {
 function appendMessage(role, text) {
   const box = document.getElementById('messages');
   const div = document.createElement('div');
-  div.className = `max-w-[80%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${role === 'user' ? 'msg-user self-end' : 'msg-bot self-start'}`;
-  div.textContent = text;
-  box.appendChild(div); box.scrollTop = 99999;
+  div.className = `max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${role === 'user' ? 'msg-user self-end whitespace-pre-wrap' : 'msg-bot self-start'}`;
+  if (role === 'user') {
+    div.textContent = text;
+  } else {
+    // Assistant javobi — markdown + chart
+    renderAssistantContent(div, text);
+  }
+  box.appendChild(div);
+  box.scrollTop = 99999;
   return div;
+}
+
+/**
+ * Assistant javobini render qiladi:
+ * - ```chart code-block → Chart.js diagrammasi
+ * - qolgan matn → markdown (jadval, sarlavha, ro'yxat)
+ */
+function renderAssistantContent(container, text) {
+  container.innerHTML = '';
+  if (!text) return;
+
+  // ```chart ... ``` bloklarini ajratib olamiz
+  const regex = /```chart\s*([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+  const charts = [];
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      addMarkdownPart(container, text.slice(lastIndex, match.index));
+    }
+    const placeholder = addChartPlaceholder(container);
+    charts.push({placeholder, json: match[1].trim()});
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    addMarkdownPart(container, text.slice(lastIndex));
+  }
+
+  // Chart'larni render qilamiz
+  charts.forEach(c => renderChart(c.placeholder, c.json));
+}
+
+function addMarkdownPart(container, raw) {
+  const wrap = document.createElement('div');
+  wrap.className = 'md-content';
+  try {
+    wrap.innerHTML = marked.parse(raw, {breaks: true, gfm: true});
+  } catch {
+    wrap.textContent = raw;
+  }
+  container.appendChild(wrap);
+}
+
+function addChartPlaceholder(container) {
+  const wrap = document.createElement('div');
+  wrap.className = 'chart-container';
+  const canvas = document.createElement('canvas');
+  wrap.appendChild(canvas);
+  container.appendChild(wrap);
+  return canvas;
+}
+
+function renderChart(canvas, jsonStr) {
+  try {
+    const cfg = JSON.parse(jsonStr);
+    // Standart options
+    cfg.options = Object.assign({
+      responsive: true,
+      plugins: {legend: {labels: {color: '#cbd5e1'}}},
+      scales: {
+        x: {ticks: {color: '#94a3b8'}, grid: {color: '#33415544'}},
+        y: {ticks: {color: '#94a3b8'}, grid: {color: '#33415544'}},
+      },
+    }, cfg.options || {});
+    new Chart(canvas, cfg);
+  } catch(e) {
+    canvas.parentElement.innerHTML = `<div class="text-red-400 text-xs">Chart xato: ${escapeHtml(e.message)}</div>`;
+  }
 }
 
 async function loadModels() {

@@ -337,7 +337,20 @@ async def chat(req: ChatReq, user: dict = Depends(current_user)):
     settings = db.get_user_settings(uid)
     base_prompt = settings.get("system_prompt", "").strip()
     if not base_prompt:
-        base_prompt = "Siz o'zbek tilidagi AI yordamchisiz."
+        base_prompt = (
+            "Siz HP-AI Audit Assistant — o'zbek tilidagi AI yordamchisiz. "
+            "Foydalanuvchiga doim o'zbek tilida aniq va foydali javob bering. "
+            "JAVOBNI FORMATLASH QOIDALARI:\n"
+            "1) Jadvallar uchun har doim markdown jadval ishlating: | ustun | ustun |\n"
+            "2) Sarlavhalar uchun ##, ro'yxat uchun -, muhim so'zlar uchun **bold**.\n"
+            "3) Agar javobda yillar/davrlar bo'yicha sonlar bo'lsa (masalan daromad, "
+            "xarajat, foiz), markdown jadvaldan TASHQARI quyidagi formatda diagramma ham bering:\n"
+            "```chart\n{\n  \"type\": \"line\",\n  \"data\": {\n    \"labels\": [\"2017\",\"2018\",\"2019\"],\n"
+            "    \"datasets\": [{\"label\": \"Daromad\",\"data\": [100,200,300],\"borderColor\":\"#3b82f6\",\"backgroundColor\":\"#3b82f655\"}]\n"
+            "  }\n}\n```\n"
+            "Chart turlari: 'line' (vaqt bo'yicha trend), 'bar' (taqqoslash), 'pie' (ulush), 'doughnut'.\n"
+            "Faqat raqamli ma'lumotlar bo'lsa chart bering — matnli javoblar uchun shart emas."
+        )
 
     system  = base_prompt
     sources = []
