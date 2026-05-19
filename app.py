@@ -35,10 +35,9 @@ OLLAMA_URL = "http://localhost:11435"
 user_states: dict[int, dict] = {}
 user_trainers: dict[int, Trainer] = {}
 
-# ── Global (umumiy) RAG — barcha userlar uchun bitta bilim bazasi ─────────────
-GLOBAL_RAG_FILE = "rag_index_global.json"
+# ── Global (umumiy) RAG — FAISS asosida ───────────────────────────────────────
 global_rag = RAGIndex()
-global_rag.load(GLOBAL_RAG_FILE)
+global_rag.load()  # rag_index.json + rag_index.faiss
 global_rag_state = {"building": False, "logs": []}
 
 
@@ -210,7 +209,7 @@ def _build_global_rag_bg(builder_uid: int, file_specs: list[dict]):
             f"📚 Umumiy bilim bazasi qurilmoqda ({len(file_specs)} ta fayl)..."
         )
         global_rag.build(file_specs, log=lambda m: global_rag_state["logs"].append(m))
-        global_rag.save(GLOBAL_RAG_FILE)
+        global_rag.save()
         db.update_training_job(job_id, "done")
     except Exception as e:
         global_rag_state["logs"].append(f"❌ Xato: {e}")
@@ -255,9 +254,6 @@ async def rag_status(user: dict = Depends(current_user)):
 async def rag_clear(admin: dict = Depends(admin_required)):
     """Faqat admin RAG'ni tozalashi mumkin."""
     global_rag.clear()
-    p = Path(GLOBAL_RAG_FILE)
-    if p.exists():
-        p.unlink()
     return {"ok": True}
 
 

@@ -25,3 +25,9 @@ triton>=3.0
 numpy
 sentencepiece
 protobuf
+
+# RAG vector search
+faiss-cpu>=1.7.4
+
+# DOCX o'qish
+python-docx

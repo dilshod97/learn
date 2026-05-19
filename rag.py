@@ -1,24 +1,25 @@
 """
-RAG (Retrieval-Augmented Generation)
+RAG (Retrieval-Augmented Generation) — FAISS bilan
 Yuklangan fayllarni chunk + embedding qiladi.
-Savol kelganda mos qismlarni topib, modelga kontekst sifatida beradi.
-Embedding model: Ollama'ning nomic-embed-text.
+FAISS IndexFlatIP (normalized) = cosine similarity, lekin C++ tezligida.
 """
 
 import re
 import json
 import numpy as np
 import requests
+import faiss
 from pathlib import Path
 from file_reader import read_file_text
 
 OLLAMA_URL  = "http://localhost:11435"
 EMBED_MODEL = "qwen3-embedding:8b"
-INDEX_FILE  = "rag_index.json"
+INDEX_FILE  = "rag_index.json"   # metadata (text, source, uploaded_by)
+FAISS_FILE  = "rag_index.faiss"  # vector index
 
 
 def _embed(text: str) -> list:
-    # Yangi API: /api/embed (qwen3, bge, va boshqalar uchun)
+    # Yangi API (qwen3, bge)
     try:
         r = requests.post(
             f"{OLLAMA_URL}/api/embed",
@@ -27,14 +28,11 @@ def _embed(text: str) -> list:
         )
         if r.status_code == 200:
             data = r.json()
-            if "embeddings" in data:
-                return data["embeddings"][0]
-            if "embedding" in data:
-                return data["embedding"]
+            if "embeddings" in data: return data["embeddings"][0]
+            if "embedding"  in data: return data["embedding"]
     except Exception:
         pass
-
-    # Eski API: /api/embeddings (nomic-embed-text uchun)
+    # Eski API (nomic-embed-text)
     r = requests.post(
         f"{OLLAMA_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
@@ -44,22 +42,14 @@ def _embed(text: str) -> list:
     return r.json()["embedding"]
 
 
-def _cosine(a, b) -> float:
-    a, b = np.array(a, dtype=np.float32), np.array(b, dtype=np.float32)
-    na, nb = np.linalg.norm(a), np.linalg.norm(b)
-    return float(np.dot(a, b) / (na * nb)) if na and nb else 0.0
-
-
 def _chunk_text(text: str, size: int = 200) -> list[str]:
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text).strip()
-    # Sentence-aware chunking
     sentences = re.split(r'(?<=[.!?…])\s+|\n\n', text)
     chunks, cur, cur_len = [], [], 0
     for sent in sentences:
         sent = sent.strip()
-        if not sent:
-            continue
+        if not sent: continue
         words = sent.split()
         if cur_len + len(words) > size and cur:
             chunks.append(" ".join(cur))
@@ -72,34 +62,41 @@ def _chunk_text(text: str, size: int = 200) -> list[str]:
     return [c for c in chunks if len(c.split()) >= 10]
 
 
+def _normalize(vecs: np.ndarray) -> np.ndarray:
+    """L2 normalization → IndexFlatIP'da inner product = cosine similarity."""
+    vecs = vecs.astype(np.float32, copy=False)
+    faiss.normalize_L2(vecs)
+    return vecs
+
+
 class RAGIndex:
     def __init__(self):
-        self.chunks: list[dict] = []  # {text, emb, source}
+        self.chunks: list[dict] = []   # {text, source, uploaded_by} — emb yo'q (FAISS'da)
+        self.index : faiss.Index | None = None
+        self.dim   : int | None = None
 
     @property
     def ready(self) -> bool:
-        return bool(self.chunks)
+        return bool(self.chunks) and self.index is not None
 
     def stats(self) -> dict:
-        sources = {}
-        contributors = {}
+        sources, contributors = {}, {}
         for c in self.chunks:
-            sources[c["source"]] = sources.get(c["source"], 0) + 1
-            u = c.get("uploaded_by", "—")
-            contributors[u] = contributors.get(u, 0) + 1
+            sources[c["source"]]                    = sources.get(c["source"], 0) + 1
+            contributors[c.get("uploaded_by", "—")] = contributors.get(c.get("uploaded_by", "—"), 0) + 1
         return {
             "total_chunks": len(self.chunks),
             "sources"     : sources,
             "contributors": contributors,
+            "backend"     : "FAISS" + (f" (dim={self.dim})" if self.dim else ""),
         }
 
     # ── Build ──────────────────────────────────────────────────────────────
     def build(self, files: list, log=None) -> int:
-        """
-        files: list of dict {path, source, uploaded_by} yoki oddiy string list.
-        """
         self.chunks = []
+        self.index  = None
 
+        # Fayl ma'lumotlarini normallashtirish
         norm = []
         for f in files:
             if isinstance(f, str):
@@ -111,6 +108,7 @@ class RAGIndex:
                     "uploaded_by": f.get("uploaded_by", "—"),
                 })
 
+        # Chunklarga ajratish
         for item in norm:
             try:
                 raw   = read_file_text(item["path"])
@@ -120,7 +118,6 @@ class RAGIndex:
                 for chunk in parts:
                     self.chunks.append({
                         "text"       : chunk,
-                        "emb"        : None,
                         "source"     : item["source"],
                         "uploaded_by": item["uploaded_by"],
                     })
@@ -131,64 +128,91 @@ class RAGIndex:
         if not self.chunks:
             raise ValueError("Fayllardan chunk ajratib bo'lmadi")
 
+        # Embeddinglarni hisoblash
         total = len(self.chunks)
         if log:
-            log(f"⚡ {total} ta chunk uchun embedding yasalmoqda...")
+            log(f"⚡ {total} ta chunk uchun embedding hisoblanmoqda (FAISS)...")
 
+        embs = []
         for i, item in enumerate(self.chunks):
-            item["emb"] = _embed(item["text"])
-            if log and (i + 1) % 5 == 0:
+            embs.append(_embed(item["text"]))
+            if log and (i + 1) % 10 == 0:
                 log(f"   {i+1}/{total} tayyor...")
+
+        # FAISS index quramiz
+        mat = np.array(embs, dtype=np.float32)
+        self.dim = mat.shape[1]
+        mat = _normalize(mat)
+        self.index = faiss.IndexFlatIP(self.dim)
+        self.index.add(mat)
 
         self.save()
         if log:
-            log(f"✅ RAG index tayyor: {total} ta chunk")
+            log(f"✅ FAISS index tayyor: {total} chunk, dim={self.dim}")
         return total
 
     # ── Search ─────────────────────────────────────────────────────────────
-    def search(self, query: str, top_k: int = 4, threshold: float = 0.3) -> list[dict]:
-        if not self.chunks:
+    def search(self, query: str, top_k: int = 5, threshold: float = 0.3) -> list[dict]:
+        if not self.ready:
             return []
-        q_emb = _embed(query)
-        scored = [
-            {"text": item["text"],
-             "source": item["source"],
-             "uploaded_by": item.get("uploaded_by", "—"),
-             "score": _cosine(q_emb, item["emb"])}
-            for item in self.chunks
-        ]
-        scored.sort(key=lambda x: -x["score"])
-        return [r for r in scored[:top_k] if r["score"] >= threshold]
+        q = np.array([_embed(query)], dtype=np.float32)
+        q = _normalize(q)
+        scores, indices = self.index.search(q, min(top_k, len(self.chunks)))
+
+        results = []
+        for score, idx in zip(scores[0], indices[0]):
+            if idx < 0 or score < threshold:
+                continue
+            c = self.chunks[idx]
+            results.append({
+                "text"       : c["text"],
+                "source"     : c["source"],
+                "uploaded_by": c.get("uploaded_by", "—"),
+                "score"      : float(score),
+            })
+        return results
 
     # ── Persist ────────────────────────────────────────────────────────────
-    def save(self, path: str = INDEX_FILE):
-        with open(path, "w", encoding="utf-8") as f:
+    def save(self, meta_path: str = INDEX_FILE, faiss_path: str = FAISS_FILE):
+        with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(self.chunks, f, ensure_ascii=False)
+        if self.index is not None:
+            faiss.write_index(self.index, faiss_path)
 
-    def load(self, path: str = INDEX_FILE) -> bool:
-        if not Path(path).exists():
+    def load(self, meta_path: str = INDEX_FILE, faiss_path: str = FAISS_FILE) -> bool:
+        if not Path(meta_path).exists():
             return False
         try:
-            with open(path, encoding="utf-8") as f:
-                self.chunks = json.load(f)
+            with open(meta_path, encoding="utf-8") as f:
+                data = json.load(f)
+            # Eski format (emb ichida bo'lsa) → tashlab yuboramiz
+            self.chunks = [
+                {"text": c["text"], "source": c["source"], "uploaded_by": c.get("uploaded_by", "—")}
+                for c in data
+            ]
+            if Path(faiss_path).exists():
+                self.index = faiss.read_index(faiss_path)
+                self.dim   = self.index.d
             return self.ready
-        except Exception:
+        except Exception as e:
+            print(f"RAG load xato: {e}", flush=True)
             return False
 
     def clear(self):
         self.chunks = []
-        if Path(INDEX_FILE).exists():
-            Path(INDEX_FILE).unlink()
+        self.index  = None
+        self.dim    = None
+        for p in (INDEX_FILE, FAISS_FILE):
+            if Path(p).exists():
+                Path(p).unlink()
 
 
 def is_embed_available() -> bool:
-    """EMBED_MODEL Ollama'da bormi tekshirish."""
     try:
         r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
         models = r.json().get("models", [])
         names  = [m.get("name", "") for m in models]
-        # To'liq nom yoki nom asosi mosligi
-        base = EMBED_MODEL.split(":")[0]
+        base   = EMBED_MODEL.split(":")[0]
         return any(EMBED_MODEL == n or base in n for n in names)
     except Exception:
         return False
